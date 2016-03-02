@@ -96,10 +96,15 @@ class NgramModel(ModelI):
 
         # FIXME: More robust check?
         # If given a list of strings instead of a list of lists, create enclosing list
-        if issubclass(train, Iterable):
-            train, copy = itertools.tee(train)
-        elif (train is not None) and isinstance(train[0], compat.string_types):
-            train = [train]
+        try:
+            if issubclass(train, Iterable):
+                train, copy = itertools.tee(train)
+            elif (train is not None) and isinstance(train[0], compat.string_types):
+                train = [train]
+        except ValueError:
+            pass
+        finally:
+            copy = train
 
 
         # we need to keep track of the number of word types we encounter
@@ -122,10 +127,11 @@ class NgramModel(ModelI):
 
         # recursively construct the lower-order models
         if not self._unigram_model:
-            self._backoff = NgramModel(n-1, copy,
-                                        pad_left, pad_right,
-                                        estimator,
-                                        **estimator_kwargs)
+            self._backoff = NgramModel(n-1,
+                                       train,
+                                       pad_left, pad_right,
+                                       estimator,
+                                       **estimator_kwargs)
 
             self._backoff_alphas = dict()
             # For each condition (or context)
@@ -212,30 +218,28 @@ class NgramModel(ModelI):
         :param context: the context the word is in
         :type context: list(str)
         """
-
         return -log(self.prob(word, context), 2)
 
     def choose_random_word(self, context):
-        '''
+        """
         Randomly select a word that is likely to appear in this context.
 
         :param context: the context the word is in
         :type context: list(str)
-        '''
-
+        """
         return self.generate(1, context)[-1]
 
     # NB, this will always start with same word if the model
     # was trained on a single text
     def generate(self, num_words, context=()):
-        '''
+        """
         Generate random text based on the language model.
 
         :param num_words: number of words to generate
         :type num_words: int
         :param context: initial words in generated string
         :type context: list(str)
-        '''
+        """
 
         text = list(context)
         for i in range(num_words):
