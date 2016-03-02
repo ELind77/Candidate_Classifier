@@ -185,7 +185,7 @@ class DebateCorpusReader(PlaintextCorpusReader):
         # Get speakers
         speakers = self._parse_speakers(fileids, speakers)
         # Make reader
-        reader = self._make_speaker_block_reader(speakers)
+        reader = self._make_utterance_block_reader(speakers)
         return self._reader_view(fileids, reader)
 
     def grouped_words(self, fileids=None, speakers=None):
@@ -316,9 +316,16 @@ class DebateCorpusReader(PlaintextCorpusReader):
         def wbr(stream):
             words = []
             # Read a chunk of paras and remove the speaker label
-            for para in (reader(stream)[1] for i in xrange(10)):
-                words.extend(self._word_tokenizer.tokenize(para))
-            return words
+            try:
+                for i in xrange(10):
+                    for para in reader(stream):
+                        if not para:
+                            raise StopIteration
+                        words.extend(self._word_tokenizer.tokenize(para[1]))
+            except StopIteration:
+                return words
+            finally:
+                return words
 
         return wbr
 
@@ -332,7 +339,7 @@ class DebateCorpusReader(PlaintextCorpusReader):
             sents = []
             for para in reader(stream):
                 sents.extend([self._word_tokenizer.tokenize(sent)
-                              for sent in self._sent_tokenizer.tokenize(para) if sent])
+                              for sent in self._sent_tokenizer.tokenize(para[1]) if sent])
             return sents
 
         return sbr
@@ -393,7 +400,7 @@ class DebateCorpusReader(PlaintextCorpusReader):
                 #                         for sent in self._sent_tokenizer.tokenize(para) if sent]))
                 # TODO: Better error checking
                 split = self._speaker_pattern.split(para, maxsplit=1)
-                paras.append((split[1], split[2]))
+                paras.append((self._clean_speaker(split[1]), split[2]))
             return paras
 
         return new_reader
@@ -412,10 +419,11 @@ class DebateCorpusReader(PlaintextCorpusReader):
         # it should work
         # I suppose I could also use itertools.takewhile...
         def helper(stream):
-            p = reader(stream)
-            while p:
-                yield p[1]
-                p = reader(stream)
+            paras = reader(stream)
+            while paras:
+                for p in paras:
+                    yield p[1]
+                paras = reader(stream)
 
         def jsbr(stream):
             text = u' '.join(p for p in helper(stream))
