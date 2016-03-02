@@ -13,6 +13,8 @@ The NgramModel class is resurrected from the NLTK project and is mostly function
 
 
 ### TODO:
+- Process all text to static files
+- Process user input text
 - Copy new debates
 - Basic Flask site with text input and on-screen string output of candidate name
 - Site assets
