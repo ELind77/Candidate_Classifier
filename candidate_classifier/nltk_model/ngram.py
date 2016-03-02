@@ -96,15 +96,15 @@ class NgramModel(ModelI):
 
         # FIXME: More robust check?
         # If given a list of strings instead of a list of lists, create enclosing list
-        try:
-            if issubclass(train, Iterable):
-                train, copy = itertools.tee(train)
-            elif (train is not None) and isinstance(train[0], compat.string_types):
-                train = [train]
-        except ValueError:
-            pass
-        finally:
-            copy = train
+        # try:
+        #     if issubclass(train, Iterable):
+        #         train, copy = itertools.tee(train)
+        #     elif (train is not None) and isinstance(train[0], compat.string_types):
+        #         train = [train]
+        # except ValueError:
+        #     pass
+        # finally:
+        #     copy = train
 
 
         # we need to keep track of the number of word types we encounter

@@ -61,8 +61,6 @@ class StringProcessor(object):
 
                 yield sent
 
-
-
     # def __call__(self, s):
     #     Yes, I know this is difficult to read.  But this is
     #     my library and I'll do as I please thank you very much.
@@ -310,7 +308,7 @@ class TransformerABC(object):
 
         # Tokenize last.  If you want to process the tokens use another
         # Transformer
-        if self.tokenizer:
+        if self.tokenizer and s:
             s = self.tokenizer(s)
 
         return s
