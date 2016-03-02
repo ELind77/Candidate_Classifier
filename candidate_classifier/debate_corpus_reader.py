@@ -1,8 +1,6 @@
 #! /usr/bin/env python2
 
 
-from candidate_classifier import utils
-
 from nltk.corpus.reader.util import *
 from nltk.corpus import PlaintextCorpusReader
 import nltk
@@ -45,6 +43,22 @@ class DebateCorpusReader(PlaintextCorpusReader):
     Extension of the NLTK `PlaintextCorpusReader` designed to read
     presedential debate transcripts from The American Presidency Project
     http://www.presidency.ucsb.edu/debates.php
+
+    There are two ways to access the tokens of a DebateCorpusReader instance,
+    through the standard `words()` and`sents()` functions and through the
+     `grouped_words()` and `grouped_sents()` functions.  The standard functions
+    simply return the words and sentences of the documents as they appear,
+    separated by the 'SPEAKER:' indicator in the file.  But the grouped
+    alternatives separate out the text by individual speakers (and
+    `grouped_sents()` joins text accross 'SPEAKER:' boundaries to improve
+    sentence tokenization) so that you can operate on tokens/sentences for each
+    speaker.
+
+    All of the methods above accept `speakers` as a keyword argument so that only
+    the tokens of a given speaker or list of speakers will be returned.
+
+    The default NLTK tokenizers are used by default but anything that fits the
+    contract can be used.
     """
     _speaker_pattern = re.compile(r"(^\[?[A-Z :\-?_]+\]?:+)", re.U | re.M)
 
@@ -285,23 +299,6 @@ class DebateCorpusReader(PlaintextCorpusReader):
                        for (path, enc, fileid)
                        in self.abspaths(fileids, True, True)])
 
-    # def _read_word_block(self, stream):
-    #     words = []
-    #     for i in range(20):  # Read 20 lines at a time.
-    #         # Replace any reference to the speakers
-    #         line = self._speaker_pattern.sub('', stream.readline())
-    #         words.extend(self._word_tokenizer.tokenize(line))
-    #     return words
-
-    # def _read_para_block(self, stream):
-    #     """Shadows parent method so that it can strip the leading 'SPEAKER:'."""
-    #     paras = []
-    #     for para in self._para_block_reader(stream):
-    #         para = self._speaker_pattern.sub('', para, count=1)
-    #         paras.append([self._word_tokenizer.tokenize(sent)
-    #                       for sent in self._sent_tokenizer.tokenize(para) if sent])
-    #     return paras
-
 
     #
     # Reader Factories
@@ -402,28 +399,6 @@ class DebateCorpusReader(PlaintextCorpusReader):
         return new_reader
 
 
-    # def _make_joined_reader(self, speaker):
-    #     """
-    #     Creates a reader function that takes in a stream from
-    #     a debate transcript file and returns all of the utterances
-    #     of the given speaker in that stream, joined as a single
-    #     stream (without the speaker identifier).
-    #     """
-    #     start_re = self._make_speaker_pattern(speaker)
-    #     end_re = self._speaker_pattern
-    #     reader = self._make_regex_block_reader(start_re=start_re, end_re=end_re)
-    #
-    #     def new_reader(stream):
-    #         acc = u''
-    #         p = reader(stream)
-    #         while p:
-    #             acc += u' '.join(self._speaker_pattern.sub('', t, count=1) for t in p)
-    #             p = reader(stream)
-    #         return [self._word_tokenizer.tokenize(sent)
-    #                 for sent in self._sent_tokenizer.tokenize(acc) if sent]
-    #
-    #     return new_reader
-
     def _make_joined_sent_block_reader(self, speaker):
         """Factory method to create a reader that reads everything a given speaker
         says in a stream and then tokenize it."""
@@ -435,6 +410,7 @@ class DebateCorpusReader(PlaintextCorpusReader):
         # E.g. https://waymoot.org/home/python_string/
         # I still need to actually benchmark this on this particular task, but
         # it should work
+        # I suppose I could also use itertools.takewhile...
         def helper(stream):
             p = reader(stream)
             while p:
