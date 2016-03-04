@@ -17,10 +17,10 @@ The NgramModel class is resurrected from the NLTK project and is mostly function
     - Bootstrap
     - Candidate pictures
     - Description of project
-- Add phrases model and nltk mutli-word-expression
+- Add phrases model and nltk mutli-word-expression tokenizer
 - Create ensemble classifier with:
-    - Naive Bayes (sk-learn)
-    - doc2vec (gensim)
+    - Naive Bayes (sk-learn?)
+    - doc2vec (gensim + sklearn)
 - Prettify site
     - Some kind of roulette scroller while it's doing classification...?
 - Keep a list of all queries and show some of the best ones on the site

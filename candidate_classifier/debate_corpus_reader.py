@@ -411,6 +411,7 @@ class DebateCorpusReader(PlaintextCorpusReader):
         says in a stream and then tokenize it."""
         reader = self._make_speaker_block_reader(speaker)
 
+        # FIXME: On most recent pytyhon this is no longer true.  += is faster
         # What I've done here is a bit convoluted, but the purpose is to take
         # advantage of the fact that str.join is much faster at string
         # concatenation than +=
