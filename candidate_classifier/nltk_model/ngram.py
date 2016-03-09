@@ -9,9 +9,18 @@
 # This is copied from nltk commit: c54edec
 # on the "model" branch.
 
+
+# SimpleGoodTuring probdist just doesn't work at all with this model:
+# https://github.com/nltk/nltk/issues/602
+
+# So far, only lidstone and laplace work.  WrittenBell might work but I haven't
+# tested yet and it may be a pain to test by hand.
+
+
 from __future__ import unicode_literals
 
 from math import log
+import warnings
 from collections import Iterable
 import itertools
 
@@ -19,20 +28,16 @@ from nltk.probability import ConditionalProbDist, ConditionalFreqDist, LidstoneP
 from nltk.util import ngrams
 from nltk import compat
 
-
 from candidate_classifier.nltk_model.api import ModelI
-from candidate_classifier.utils import flatten
 
 
-# def _estimator(fdist, **estimator_kwargs):
-#     """
-#     Default estimator function using a LidstoneProbDist.
-#     """
-#     # can't be an instance method of NgramModel as they
-#     # can't be pickled either.
-#     return LidstoneProbDist(fdist, 0.001, **estimator_kwargs)
-
-_estimator = lambda freqdist, bins: LidstoneProbDist(freqdist, 0.002, bins)
+def _estimator(fdist, **estimator_kwargs):
+    """
+    Default estimator function using a LidstoneProbDist.
+    """
+    # can't be an instance method of NgramModel as they
+    # can't be pickled either.
+    return LidstoneProbDist(fdist, 0.001, **estimator_kwargs)
 
 
 @compat.python_2_unicode_compatible
@@ -43,7 +48,7 @@ class NgramModel(ModelI):
 
     # add cutoff
     def __init__(self, n, train, pad_left=False, pad_right=False,
-                 estimator=None, **estimator_kwargs):
+                 estimator=_estimator, **estimator_kwargs):
         """
         Create an ngram language model to capture patterns in n consecutive
         words of training text.  An estimator smooths the probabilities derived
@@ -59,6 +64,11 @@ class NgramModel(ModelI):
             >>> lm.entropy(brown.words(categories='humor'))
             ... # doctest: +ELLIPSIS
             12.0399...
+
+        NB: If a ``bins`` parameter is given in teh ``estimator_kwargs``
+        it will be ignored.  The number of bins to use is the number of
+        outcomes (tokens) encountered at each level of the backoff recursion
+        and as such, the number must change each time.
 
         :param n: the order of the language model (ngram size)
         :type n: int
@@ -80,6 +90,13 @@ class NgramModel(ModelI):
         assert(isinstance(pad_left, bool))
         assert(isinstance(pad_right, bool))
 
+        # Check for bins argument
+        if 'bins' in estimator_kwargs:
+            warnings.warn('A value was provided for the `bins` parameter of '
+                          '`estimator_kwargs`.  This value will be overridden.'
+                          'If you think you have a better idea, write your own '
+                          'darn model.')
+
         self._lpad = ('',) * (n - 1) if pad_left else ()
         self._rpad = ('',) * (n - 1) if pad_right else ()
         self._pad_left = pad_left
@@ -90,15 +107,16 @@ class NgramModel(ModelI):
         self._unigram_model = (n == 1)
         self._n = n
 
-        if estimator is None:
-            estimator = _estimator
-
+        self._ngrams = set()
         cfd = ConditionalFreqDist()
 
-        self._ngrams = set()
-
         # FIXME: More robust check?
+        # train need to be able to be a list, tuple, or generator,
+        # or an iterable that yields such (CorpusView?)
         # If given a list of strings instead of a list of lists, create enclosing list
+        if isinstance(train[0], basestring):
+            train = [train]
+
         # try:
         #     if issubclass(train, Iterable):
         #         train, copy = itertools.tee(train)
@@ -110,8 +128,12 @@ class NgramModel(ModelI):
         #     copy = train
 
 
-        # we need to keep track of the number of word types we encounter
-        vocabulary = set()
+        # At every stage, in the backoff/recursion the number of bins for
+        # the estimator should be equal to the total number of outcomes
+        # (tokens) encountered while training.  This means that it needs
+        # to be recalculated at each level of the recursion.
+        # NB: For the unigram case, this would be the actual vocabulary size
+        outcomes = set()
         for sent in train:
             for ngram in ngrams(sent, n,
                                 pad_left,
@@ -122,18 +144,20 @@ class NgramModel(ModelI):
                 context = tuple(ngram[:-1])
                 token = ngram[-1]
                 cfd[context][token] += 1
-                vocabulary.add(token)
+                outcomes.add(token)
 
-        # Unless number of bins is explicitly passed, we should use the number
+        # Even if the number of bins is explicitly passed, we should use the number
         # of word types encountered during training as the bins value.
         # If right padding is on, this includes the padding symbol.
-        if 'bins' not in estimator_kwargs:
-            # estimator_kwargs['bins'] = len(vocabulary)
-            estimator_kwargs['bins'] = len(set(flatten(train)))
+        estimator_kwargs['bins'] = len(outcomes)
 
+        # Create the probability model
         self._model = ConditionalProbDist(cfd, estimator, **estimator_kwargs)
 
-        # recursively construct the lower-order models
+        # Clear out the bins so we don't throw recursive warnings
+        estimator_kwargs.pop('bins', None)
+
+        # Recursively construct the lower-order models
         if not self._unigram_model:
             self._backoff = NgramModel(n-1,
                                        train,
@@ -144,16 +168,16 @@ class NgramModel(ModelI):
             self._backoff_alphas = dict()
             # For each condition (or context)
             for ctxt in cfd.conditions():
-                prdist = self._model[ctxt] # prob dist for this context
+                prdist = self._model[ctxt]  # prob dist for this context
 
                 backoff_ctxt = ctxt[1:]
                 backoff_total_pr = 0.0
                 total_observed_pr = 0.0
                 for word in cfd[ctxt]:
-                    # this is the subset of words that we OBSERVED
+                    # This is the subset of words that we OBSERVED
                     # following this context
                     total_observed_pr += prdist.prob(word)
-                    # we normalize it by the total (n-1)-gram probability of
+                    # We normalize it by the total (n-1)-gram probability of
                     # words that were observed in this n-gram context
                     backoff_total_pr += self._backoff.prob(word, backoff_ctxt)
 
@@ -275,7 +299,6 @@ class NgramModel(ModelI):
         :param text: words to use for evaluation
         :type text: list(str)
         """
-
         H = 0.0     # entropy is conventionally denoted by "H"
         text = list(self._lpad) + text + list(self._rpad)
         for i in xrange(self._n - 1, len(text)):
@@ -292,7 +315,6 @@ class NgramModel(ModelI):
         :param text: words to calculate perplexity of
         :type text: list(str)
         """
-
         return pow(2.0, self.entropy(text))
 
     def __contains__(self, item):
@@ -307,54 +329,6 @@ class NgramModel(ModelI):
 
     def __repr__(self):
         return '<NgramModel with %d %d-grams>' % (len(self._ngrams), self._n)
-
-
-class NgramModelClassifier(object):
-    """sklearn-compatible classifier using an NgramModel and a probability threshold"""
-    def __init__(self, n=4, threshold=0.5):
-        """
-        :param n: The degree of the NgramModel
-        :param threshold: A probability threshold that needs to be met for a given
-            sequence to be said to have the desired class. Should be a float [0,1]
-        :type threshold: float|int
-        """
-        # check threshold
-        if threshold < 0 or threshold > 1:
-            raise ValueError("Out of range value given for threshold")
-        # Map threshold to logspace
-        self.threshold = threshold
-        self.log_threshold = -log(threshold, 2)
-
-        self.n = 4
-        self.model = None
-
-
-    def fit(self, X, y, **kwargs):
-        """X should be an array-like where each element is a list of tokens.
-        The classifier will train an NgramModel using the token lists that
-        have the label 1 as documents.
-
-        y is a list of classes.  Right now, this only works as a binary
-        classifier and classes must evaluate to True and False when tested
-        as booleans.  That said, it could be expanded to use a different
-        model for every class I suppose.
-        """
-        if 'n' in kwargs:
-            n = kwargs['n']
-            self.n = n
-
-        # TODO: Allow different estimators?
-        self.model = NgramModel(self.n, X)
-
-    def predict(self, X):
-        """X is an array-like where each element is a list of tokens."""
-        return [self.model.prob_seq(seq) >= self.log_threshold for seq in X]
-
-    def get_params(self, deep=False):
-        return {
-            'n': self.n,
-            'threshold': self.threshold
-        }
 
 
 
