@@ -21,15 +21,18 @@ from nltk import compat
 
 
 from candidate_classifier.nltk_model.api import ModelI
+from candidate_classifier.utils import flatten
 
 
-def _estimator(fdist, **estimator_kwargs):
-    """
-    Default estimator function using a LidstoneProbDist.
-    """
-    # can't be an instance method of NgramModel as they
-    # can't be pickled either.
-    return LidstoneProbDist(fdist, 0.001, **estimator_kwargs)
+# def _estimator(fdist, **estimator_kwargs):
+#     """
+#     Default estimator function using a LidstoneProbDist.
+#     """
+#     # can't be an instance method of NgramModel as they
+#     # can't be pickled either.
+#     return LidstoneProbDist(fdist, 0.001, **estimator_kwargs)
+
+_estimator = lambda freqdist, bins: LidstoneProbDist(freqdist, 0.002, bins)
 
 
 @compat.python_2_unicode_compatible
@@ -39,7 +42,7 @@ class NgramModel(ModelI):
     """
 
     # add cutoff
-    def __init__(self, n, train, pad_left=True, pad_right=False,
+    def __init__(self, n, train, pad_left=False, pad_right=False,
                  estimator=None, **estimator_kwargs):
         """
         Create an ngram language model to capture patterns in n consecutive
@@ -110,7 +113,11 @@ class NgramModel(ModelI):
         # we need to keep track of the number of word types we encounter
         vocabulary = set()
         for sent in train:
-            for ngram in ngrams(sent, n, pad_left, pad_right, pad_symbol=''):
+            for ngram in ngrams(sent, n,
+                                pad_left,
+                                pad_right,
+                                left_pad_symbol=self._lpad,
+                                right_pad_symbol=self._rpad):
                 self._ngrams.add(ngram)
                 context = tuple(ngram[:-1])
                 token = ngram[-1]
@@ -121,7 +128,8 @@ class NgramModel(ModelI):
         # of word types encountered during training as the bins value.
         # If right padding is on, this includes the padding symbol.
         if 'bins' not in estimator_kwargs:
-            estimator_kwargs['bins'] = len(vocabulary)
+            # estimator_kwargs['bins'] = len(vocabulary)
+            estimator_kwargs['bins'] = len(set(flatten(train)))
 
         self._model = ConditionalProbDist(cfd, estimator, **estimator_kwargs)
 
@@ -174,7 +182,9 @@ class NgramModel(ModelI):
         :return: float
         """
         prob = 0.0
-        for ngram in ngrams(seq, self._n, self._pad_left, self._pad_right, pad_symbol=''):
+        for ngram in ngrams(seq, self._n, self._pad_left, self._pad_right,
+                            left_pad_symbol=self._lpad,
+                            right_pad_symbol=self._rpad):
             context = tuple(ngram[:-1])
             token = ngram[-1]
             prob += self.logprob(token, context)
@@ -297,6 +307,57 @@ class NgramModel(ModelI):
 
     def __repr__(self):
         return '<NgramModel with %d %d-grams>' % (len(self._ngrams), self._n)
+
+
+class NgramModelClassifier(object):
+    """sklearn-compatible classifier using an NgramModel and a probability threshold"""
+    def __init__(self, n=4, threshold=0.5):
+        """
+        :param n: The degree of the NgramModel
+        :param threshold: A probability threshold that needs to be met for a given
+            sequence to be said to have the desired class. Should be a float [0,1]
+        :type threshold: float|int
+        """
+        # check threshold
+        if threshold < 0 or threshold > 1:
+            raise ValueError("Out of range value given for threshold")
+        # Map threshold to logspace
+        self.threshold = threshold
+        self.log_threshold = -log(threshold, 2)
+
+        self.n = 4
+        self.model = None
+
+
+    def fit(self, X, y, **kwargs):
+        """X should be an array-like where each element is a list of tokens.
+        The classifier will train an NgramModel using the token lists that
+        have the label 1 as documents.
+
+        y is a list of classes.  Right now, this only works as a binary
+        classifier and classes must evaluate to True and False when tested
+        as booleans.  That said, it could be expanded to use a different
+        model for every class I suppose.
+        """
+        if 'n' in kwargs:
+            n = kwargs['n']
+            self.n = n
+
+        # TODO: Allow different estimators?
+        self.model = NgramModel(self.n, X)
+
+    def predict(self, X):
+        """X is an array-like where each element is a list of tokens."""
+        return [self.model.prob_seq(seq) >= self.log_threshold for seq in X]
+
+    def get_params(self, deep=False):
+        return {
+            'n': self.n,
+            'threshold': self.threshold
+        }
+
+
+
 
 if __name__ == "__main__":
     import doctest
