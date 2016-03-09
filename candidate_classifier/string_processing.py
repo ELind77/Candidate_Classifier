@@ -1,20 +1,41 @@
-#! /usr/bin/env python2
+#!/usr/bin/env python2
 
 """
 Idea behind the structure:
 
- String Level Transformations
-   - Encodings
-   - Substitutions
- Tokenize
- Sentence Level Transformations
-   - Filters
-   - Transformations
- Token Level Transformations
-   - Filters
-   - Substitutions
-   - Additions
-       - Append POS, lemmatize, etc
+A StringTransformer is a generalized way to perform an ordered
+series of transformations on a string.  There are a number of
+pre-built transformations already included and arbitrary
+callables can be added to the pipeline.
+
+There are three primary kinds of transformations:
+    - substitutions
+    - filters
+    - tokenization
+
+A substitution is any operation that takes in a string and returns
+either the same string or a modification of the original string.
+
+A filter is an operation that takes in a string and either returns
+that string or returns a falsey value (indicating that that string
+was filtered).
+
+Tokenization takes in a single string and returns a list of string.
+
+
+The pipeline works in the following order:
+    1. Pre-filter substitutions
+    2. filters
+    3. post-filter substitutions
+    4. tokenization
+    5. post-tokenization operations
+        - This one is still in development and isn't stable
+
+There are two phases of subsitution for a couple of reasons. The pre-
+filter subsititutions are important because a substitution may result
+in a string that is caught by a filter.  The post-filter subsitution is
+for efficiency, why perform a potentially expensive transformation on
+a string that is going to be filtered anyways?
 
 """
 
@@ -30,17 +51,19 @@ from candidate_classifier import utils
 __author__ = 'Eric Lind'
 
 
-# TODO:
-# pre/postfilter substitutions
-#  - What if the substitution you perform changes the string so that it would have been filtered?
+PUNCT = frozenset(string.punctuation)
+
 
 
 class StringProcessor(object):
+    """This is supposed to be a composition of StringTransformers but
+    because of tokenization yielding a list, this needs to be reworked
+    to do a kind of context-dependant `yield from` possibly using the
+    flatten generator function."""
     def __init__(self,
                  string_transformer,
                  sentence_transformer=None,
                  token_transformer=None):
-        """Autobots, roll out!"""
         self.str_transformer = string_transformer
         self.sent_transformer = sentence_transformer
         self.tok_transformer = token_transformer
@@ -70,6 +93,15 @@ class StringProcessor(object):
     #     the function they want to call first, it can be first in the list.
         # return reduce(lambda x, y: y(x), self.transformers, s)
 
+
+
+# TODO:
+# - Stopwords
+# - Punctuation
+# is non-ascii
+# is numeric
+# is url
+# is email address
 
 # TODO:
 # Make a repr that shows the current filters/substitutions being used
@@ -183,9 +215,9 @@ class TransformerABC(object):
         return t
 
 
-    # TODO: Use string.translate for punctuation
+    # TODO: Use string.translate for punctuation ?
     # Use combinations of string.translate for the various combinations of substitutions
-    # Accept translation tables as agruments
+    # Accept translation tables as arguments
     def _process_substitutions(self, subs):
         t = []
 
@@ -312,89 +344,3 @@ class TransformerABC(object):
             s = self.tokenizer(s)
 
         return s
-
-
-
-
-
-
-class StringTransformer(TransformerABC):
-    def __init__(self,
-                 prefilter_substitutions=(),
-                 postfilter_substitutions=(),
-                 filters=()):
-        super(StringTransformer, self).__init__(prefilter_substitutions,
-                                                postfilter_substitutions,
-                                                filters)
-
-    def __call__(self, s):
-        # Normalize encoding
-        # TODO: Find a more robust function for this (e.g. from another library)
-        s = any2unicode(s)
-
-        return self._process(s)
-
-
-
-class SentenceTransformer(TransformerABC):
-    def __init__(self,
-                 prefilter_substitutions=(),
-                 postfilter_substitutions=(),
-                 filters=(),
-                 sent_tokenizer=None):
-        super(SentenceTransformer, self).__init__(prefilter_substitutions,
-                                                  postfilter_substitutions,
-                                                  filters)
-        # If no tokenizer is specified, it is assumed that
-        # this will be called on a pre-tokenized list of sentences
-        self.tokenizer = sent_tokenizer
-
-    def __call__(self, s):
-        """Takes in a string and yields sentences"""
-        if self.tokenizer is not None:
-            sents = self.tokenizer(s)
-        else:
-            sents = s
-
-        for sent in sents:
-            yield self._process(sent)
-
-
-
-# TODO:
-# - Stopwords
-# - Punctuation
-# is non-ascii
-# is numeric
-# is url
-# is email address
-class TokenTransformer(TransformerABC):
-    def __init__(self,
-                 prefilter_substitutions=(),
-                 postfilter_substitutions=(),
-                 filters=(),
-                 tokenizer=None):
-        super(TokenTransformer, self).__init__(prefilter_substitutions,
-                                               postfilter_substitutions,
-                                               filters)
-        # self.filters.extend(self._process_token_filters(filters))
-        # self.pre_substitutions.extend(self._process_token_substitutions(prefilter_substitutions))
-        # self.post_substitutions.extend(self._process_token_substitutions(postfilter_substitutions))
-
-        # If no tokenizer is specified, it is assumed that
-        # this will be called on a pre-tokenized list of words
-        self.tokenizer = tokenizer
-
-    def _process_token_filters(self, filters):
-        # Stopwords
-        # if f in {'stop', 'stops', 'stopwords'}:
-        #     pass
-        pass
-
-
-    def _process_token_substitutions(self, substitutions):
-        pass
-
-    # def __call__(self, sent):
-    #     """Takes in a
-
