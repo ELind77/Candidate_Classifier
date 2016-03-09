@@ -35,6 +35,8 @@ ENDS_WITH_DASH = lambda s: s[-1] == '-'
 
 
 class TransformerWrapper(object):
+    """Small class to make my string transformers compatible with
+    the NLTK CorpusReader API"""
     def __init__(self, transformer):
         self.transformer = transformer
 
