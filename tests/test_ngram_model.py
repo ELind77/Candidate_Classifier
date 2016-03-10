@@ -1,25 +1,19 @@
 from nose import tools as nosey
-import unittest
-
-__author__ = 'Eric Lind'
-
-
-import nltk
 from candidate_classifier.nltk_model import NgramModel
 from nltk.probability import LaplaceProbDist
 from nltk.probability import LidstoneProbDist
 
 
+__author__ = 'Eric Lind'
+
+
 DOC1 = ['foo', 'foo', 'foo', 'foo', 'bar', 'baz']
 
-
 def test_with_laplace():
-    num_word_types = len(set(DOC1))
     est = LaplaceProbDist
-    lm = NgramModel(3, DOC1, estimator=est, bins=num_word_types)
+    lm = NgramModel(3, DOC1, estimator=est)
 
     nosey.assert_almost_equal(lm.prob('foo', ('foo', 'foo')), 0.5)
-
     # Try with unseen context
     nosey.assert_almost_equal(lm.prob('baz', ('foo', 'foo')), 1/6.0)
 

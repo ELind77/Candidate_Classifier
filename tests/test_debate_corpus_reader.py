@@ -1,6 +1,5 @@
 from nose import tools as nosey
 from nose.tools import with_setup
-import unittest
 import os
 
 from candidate_classifier.debate_corpus_reader import DebateCorpusReader
@@ -116,6 +115,7 @@ def test_dcr_grouped_sents_can_filter_by_speaker():
 
 # Test custom tokenizer
 def test_dcr_can_use_custom_tokenizer():
-    dcr = DebateCorpusReader(ROOT, PATTERN, word_tokenizer=''.split())
+    dcr = DebateCorpusReader(ROOT, PATTERN, word_tokenizer=''.split)
     nosey.assert_is_instance(dcr, DebateCorpusReader)
+    # TODO: Check the actual output
 

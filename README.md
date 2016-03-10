@@ -13,6 +13,14 @@ The NgramModel class is resurrected from the NLTK project and is mostly function
 
 
 ### TODO:
+- Display some basic stats on the different candidates
+    - Total words
+    - unique words
+    - unique lemmas
+    - common phrases/ngrams/noun chunks/syntactic ngrams?
+    - common entities
+    - pos density
+    - sentence length
 - Site assets
     - Bootstrap
     - Candidate pictures
