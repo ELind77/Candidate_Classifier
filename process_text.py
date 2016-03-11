@@ -21,7 +21,7 @@ PROCESSED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               'candidate_classifier', 'data', 'processed', 'processed.json')
 
 FILE_PATTERN = '.*\.txt'
-CANDIDATES = ['BUSH', 'CARSON', 'CHRISTIE', 'CRUZ', 'FIORINA', 'KASICH' , 'PAUL', 'RUBIO', 'TRUMP',
+CANDIDATES = ['BUSH', 'CARSON', 'CHRISTIE', 'CRUZ', 'FIORINA', 'KASICH', 'PAUL', 'RUBIO', 'TRUMP',
               'CLINTON', 'SANDERS']
 NLP = English(entity=False, tagger=False, load_vectors=False)
 
@@ -58,14 +58,12 @@ DOC_TRANSFORMER = TransformerABC(
     prefilter_substitutions=[BRACKET_PATTERN,
                              (SPACED_ELLIPSIS_PATTERN, '...'),
                              (MULTI_ELLIPSIS_PATTERN, '...'),
-                             'whitespace',
-                             'strip',
                              'deaccent'],
     tokenizer=sent_tokenizer)
 
 
 SENT_TRANSFORMER = TransformerABC(
-    prefilter_substitutions=['strip'],
+    prefilter_substitutions=['strip', 'whitespace'],
     filters=[STARTS_WITH_ELLIPSIS, ENDS_WITH_ELLIPSIS, STARTS_WITH_DASH, ENDS_WITH_DASH],
     tokenizer=word_tokenizer)
 

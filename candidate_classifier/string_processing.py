@@ -186,7 +186,7 @@ class TransformerABC(object):
             elif hasattr(f, '__getitem__'):
                 try:
                     if f[0] in {'length', 'len', 'short'}:
-                        t.append(lambda s: len(s) <= s[1])
+                        t.append(lambda s: len(s) <= f[1])
                 # FIXME: More thorough checks
                 except (IndexError, TypeError):
                     pass
@@ -341,6 +341,6 @@ class TransformerABC(object):
         # Tokenize last.  If you want to process the tokens use another
         # Transformer
         if self.tokenizer and s:
-            s = self.tokenizer(s)
+            s = filter(None, self.tokenizer(s))
 
         return s
