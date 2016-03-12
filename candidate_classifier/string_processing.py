@@ -41,9 +41,9 @@ a string that is going to be filtered anyways?
 
 import re
 import string
-# import itertools
+import unicodedata
 from bs4 import BeautifulSoup as bs
-from gensim.utils import any2unicode, any2utf8, decode_htmlentities, deaccent
+from gensim.utils import any2unicode, any2utf8, decode_htmlentities
 from gensim.parsing import preprocessing as gprocessing
 from candidate_classifier import utils
 
@@ -175,14 +175,13 @@ class TransformerABC(object):
 
         for f in filts:
             # Length
-            if f in {'length', 'len'}:
+            if f in {'length', 'len', 'short'}:
                 # Default length is 3
                 # Create a closure
                 def funcC(fil):
                     def func(s): return len(s) <= self.min_len
                     return func
                 t.append(funcC(f))
-                # t.append(lambda s: len(s) <= self.min_len)
             elif hasattr(f, '__getitem__'):
                 try:
                     if f[0] in {'length', 'len', 'short'}:
@@ -235,8 +234,9 @@ class TransformerABC(object):
                 t.append(decode_htmlentities)
 
             # Daccent
+            # TODO: Document that this will also remove all non-ascii characters
             elif sub == 'deaccent':
-                t.append(deaccent)
+                t.append(self._strip_accents_ascii)
 
             # Punctuation
             elif sub in {'punct', 'punctuation', 'puncts'}:
@@ -294,6 +294,23 @@ class TransformerABC(object):
         else:
             return False
 
+    @staticmethod
+    def _strip_accents_ascii(s):
+        """
+        This is shamelessly ripped off from scikit learn:
+        https://github.com/scikit-learn/scikit-learn/blob/51a765a/sklearn/feature_extraction/text.py#L504
+
+        Transform accentuated unicode symbols into ascii or nothing
+        Warning: this solution is only suited for languages that have a direct
+        transliteration to ASCII symbols.
+        See also
+        --------
+        strip_accents_unicode
+            Remove accentuated char for any unicode symbol.
+        """
+        nkfd_form = unicodedata.normalize('NFKD', s)
+        return nkfd_form.encode('ASCII', 'ignore').decode('ASCII')
+
     def _flat_process(self, s):
         """Takes in either an iterator or a string and yields strings.
         Calling this on a nested list will result in a flattened list.
@@ -321,7 +338,11 @@ class TransformerABC(object):
 
         # Skip empty strings:
         if len(s) == 0:
-            return s
+            # Keep return type consistent
+            if self.tokenizer:
+                return []
+            else:
+                return ''
 
         # Normalize the encoding before anything else
         if self.normalize_encoding:
@@ -333,7 +354,11 @@ class TransformerABC(object):
 
         # If any of the filters return True, filter the string
         if any(f(s) for f in self.filters):
-            return ''
+            # Keep return type consistent
+            if self.tokenizer:
+                return []
+            else:
+                return ''
 
         for sub in self.post_substitutions:
             s = sub(s)
