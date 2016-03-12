@@ -51,6 +51,16 @@ from candidate_classifier import utils
 __author__ = 'Eric Lind'
 
 
+# TODO:
+# - Stopwords
+# - Punctuation
+# is non-ascii
+# is numeric
+# is url
+# is email address
+
+
+
 PUNCT = frozenset(string.punctuation)
 
 
@@ -95,13 +105,74 @@ class StringProcessor(object):
 
 
 
-# TODO:
-# - Stopwords
-# - Punctuation
-# is non-ascii
-# is numeric
-# is url
-# is email address
+# ========================
+# FILTERS
+# ========================
+# Filters return True if a condition is met.
+# If a filter returns True for a given string,
+# that string is filtered out.
+
+def length_check(length=3):
+    def inner(s):
+        return len(s) <= length
+    return inner
+
+
+def pattern_check(pattern):
+    def inner(s):
+        return pattern.search(s)
+    return inner
+
+
+def is_non_ascii(s):
+    """
+    Returns True if the string contains non-ascii characters
+    Fastest way to check for non-ascii:
+    http://stackoverflow.com/questions/196345/how-to-check-if-a-string-in-python-is-in-ascii
+    """
+    try:
+        s.decode('ascii')
+    except UnicodeDecodeError:
+        return True
+    else:
+        return False
+
+
+# ========================
+# SUBSTIUTIONS
+# ========================
+# Substituations take in a string and return some
+# transformed version of that string.
+
+def strip_html(s):
+    return bs(s, 'lxml').get_text()
+
+
+# TODO: Compare this to gensim method.
+# NFC vs NKKD?
+def strip_accents_ascii(s):
+    """
+    This is shamelessly ripped off from scikit learn:
+    https://github.com/scikit-learn/scikit-learn/blob/51a765a/sklearn/feature_extraction/text.py#L504
+
+    Transform accentuated unicode symbols into ascii or nothing
+    Warning: this solution is only suited for languages that have a direct
+    transliteration to ASCII symbols.
+    See also
+    --------
+    strip_accents_unicode
+        Remove accentuated char for any unicode symbol.
+    """
+    nkfd_form = unicodedata.normalize('NFKD', s)
+    return nkfd_form.encode('ASCII', 'ignore').decode('ASCII')
+
+
+def pattern_sub(pattern):
+    def inner(s):
+        return pattern.sub('', s)
+    return inner
+
+
 
 # TODO:
 # Make a repr that shows the current filters/substitutions being used
@@ -177,31 +248,24 @@ class TransformerABC(object):
             # Length
             if f in {'length', 'len', 'short'}:
                 # Default length is 3
-                # Create a closure
-                def funcC(fil):
-                    def func(s): return len(s) <= self.min_len
-                    return func
-                t.append(funcC(f))
+                t.append(length_check(self.min_len))
             elif hasattr(f, '__getitem__'):
                 try:
                     if f[0] in {'length', 'len', 'short'}:
-                        t.append(lambda s: len(s) <= f[1])
+                        # t.append(lambda s: len(s) <= f[1])
+                        t.append(length_check(f[1]))
                 # FIXME: More thorough checks
                 except (IndexError, TypeError):
                     pass
 
             # Patterns
             elif isinstance(f, self.re_type):
-                # Create a closure for the current filter
-                def funcC(fil):
-                    def func(s): return re.search(fil, s)
-                    return func
-                t.append(funcC(f))
+                t.append(pattern_check(f))
                 # t.append(lambda s: re.search(f, s))
 
             # Non-Ascii
             elif re.search(self.non_ascii_pattern, str(f)):
-                t.append(self._is_non_ascii)
+                t.append(is_non_ascii)
 
             # Callable
             elif hasattr(f, '__call__'):
@@ -226,7 +290,7 @@ class TransformerABC(object):
         for sub in subs:
             # HTML
             if sub == 'html':
-                t.append(lambda s: bs(s, 'lxml').get_text())
+                t.append(strip_html)
 
             # HTML entities
             # if sub in {'htmlentities', 'html entities', 'html_entities', 'html-entities'}:
@@ -236,13 +300,15 @@ class TransformerABC(object):
             # Daccent
             # TODO: Document that this will also remove all non-ascii characters
             elif sub == 'deaccent':
-                t.append(self._strip_accents_ascii)
+                t.append(strip_accents_ascii)
 
             # Punctuation
+            # TODO: Compare performance to string.translate
             elif sub in {'punct', 'punctuation', 'puncts'}:
                 t.append(gprocessing.strip_punctuation)
 
             # Case
+            # TODO: Compare performance to string.translate
             elif sub == 'lower':
                 t.append(string.lower)
             elif sub == 'upper':
@@ -255,61 +321,32 @@ class TransformerABC(object):
                 t.append(string.strip)
 
             # callable
+            # TODO: look at gensim.utils.identity
             elif hasattr(sub, '__call__'):
                 t.append(sub)
 
             # patterns
             elif isinstance(sub, self.re_type):
-                # TODO: Make more elegant
-                def funcC(sub):
-                    def func(s): return sub.sub('', s)
-                    return func
-                t.append(funcC(sub))
+                t.append(pattern_sub(sub))
                 # t.append(lambda s: sub.sub('', s))
             else:
                 try:
+                    # TODO: Better checking
+                    # Dict support?
                     if isinstance(sub[0], self.re_type):
-                        def funcC(sub):
-                            # FIXME: Use compiled pattern
-                            # def func(s): sub[0].sub(sub[1], s)
-                            def func(s): return re.sub(sub[0], sub[1], s)
-                            return func
-                        t.append(funcC(sub))
+                        # def funcC(sub):
+                        #     # FIXME: Use compiled pattern
+                        #     # def func(s): sub[0].sub(sub[1], s)
+                        #     def func(s): return re.sub(sub[0], sub[1], s)
+                        #     return func
+                        # t.append(funcC(sub))
                         # t.append(lambda s: re.sub(sub[0], sub[1], s))
+                        t.append(pattern_sub(sub))
                 except IndexError:
                     pass
 
         return t
 
-    @staticmethod
-    def _is_non_ascii(s):
-        """Returns True if the string contains non-ascii characters
-        Fastest way to check for non-ascii:
-        http://stackoverflow.com/questions/196345/how-to-check-if-a-string-in-python-is-in-ascii
-        """
-        try:
-            s.decode('ascii')
-        except UnicodeDecodeError:
-            return True
-        else:
-            return False
-
-    @staticmethod
-    def _strip_accents_ascii(s):
-        """
-        This is shamelessly ripped off from scikit learn:
-        https://github.com/scikit-learn/scikit-learn/blob/51a765a/sklearn/feature_extraction/text.py#L504
-
-        Transform accentuated unicode symbols into ascii or nothing
-        Warning: this solution is only suited for languages that have a direct
-        transliteration to ASCII symbols.
-        See also
-        --------
-        strip_accents_unicode
-            Remove accentuated char for any unicode symbol.
-        """
-        nkfd_form = unicodedata.normalize('NFKD', s)
-        return nkfd_form.encode('ASCII', 'ignore').decode('ASCII')
 
     def _flat_process(self, s):
         """Takes in either an iterator or a string and yields strings.
