@@ -260,46 +260,6 @@ class DebateCorpusReader(PlaintextCorpusReader):
                        for (path, enc, fileid)
                        in self.abspaths(fileids, True, True)])
 
-
-    # def joined_speaker_paras(self, fileids=None, speakers=None):
-    #     """Because of the nature of the text, interruptions, cross-talk, etc.
-    #     many sentences are split across speaker boundaries.  This can cause unclean
-    #     sentence tokenization.  This method is not particularly memory efficient
-    #     because it reads in a whole file at a time, but it avoids the tokenization
-    #     issue.
-    #     """
-    #     if fileids is None: fileids = self._fileids
-    #     elif isinstance(fileids, string_types): fileids = [fileids]
-    #
-    #     speakers = self._parse_speakers(fileids, speakers)
-    #
-    #     paras = {}
-    #
-    #     for s in speakers:
-    #         reader = self._make_joined_reader(s)
-    #         paras[s] = concat([self.CorpusView(path, reader, encoding=enc)
-    #                            for (path, enc, fileid)
-    #                            in self.abspaths(fileids, True, True)])
-    #
-    #     return paras
-    #
-    # def all_speaker_paras(self, fileids=None):
-    #     return {name: self.speaker_paras(name) for name in self.speakers(fileids=fileids)}
-    #
-    # def speaker_paras(self, fileids=None, speakers=None):
-    #     """Returns a dictionary of
-    #     {str speaker_name: CorpusView paragraphs}
-    #     """
-    #     # FIXME: Uppercase speakers
-    #     # speakers = [s.upper() for s in speakers]
-    #     # TODO: Tokenize etc.
-    #     reader = self._make_speaker_block_reader(speakers)
-    #
-    #     return concat([self.CorpusView(path, reader, encoding=enc)
-    #                    for (path, enc, fileid)
-    #                    in self.abspaths(fileids, True, True)])
-
-
     #
     # Reader Factories
     # Factory methods for the various block readers
@@ -411,6 +371,16 @@ class DebateCorpusReader(PlaintextCorpusReader):
         says in a stream and then tokenize it."""
         reader = self._make_speaker_block_reader(speaker)
 
+        def jsbr2(stream):
+            acc = u''
+            # Read a block and accumulate till the stream is done
+            paras = reader(stream)
+            while paras:
+                acc += u' '.join(p[1] for p in paras)
+                paras = reader(stream)
+            return [self._word_tokenizer.tokenize(sent)
+                    for sent in self._sent_tokenizer.tokenize(acc) if sent]
+
         # FIXME: On most recent python this is no longer true.  += is faster
         # What I've done here is a bit convoluted, but the purpose is to take
         # advantage of the fact that str.join is much faster at string
@@ -419,19 +389,19 @@ class DebateCorpusReader(PlaintextCorpusReader):
         # I still need to actually benchmark this on this particular task, but
         # it should work
         # I suppose I could also use itertools.takewhile...
-        def helper(stream):
-            paras = reader(stream)
-            while paras:
-                for p in paras:
-                    yield p[1]
-                paras = reader(stream)
+        # def helper(stream):
+        #     paras = reader(stream)
+        #     while paras:
+        #         for p in paras:
+        #             yield p[1]
+        #         paras = reader(stream)
+        #
+        # def jsbr(stream):
+        #     text = u' '.join(p for p in helper(stream))
+        #     return [self._word_tokenizer.tokenize(sent)
+        #             for sent in self._sent_tokenizer.tokenize(text) if sent]
 
-        def jsbr(stream):
-            text = u' '.join(p for p in helper(stream))
-            return [self._word_tokenizer.tokenize(sent)
-                    for sent in self._sent_tokenizer.tokenize(text) if sent]
-
-        return jsbr
+        return jsbr2
 
 
     # Helpers
