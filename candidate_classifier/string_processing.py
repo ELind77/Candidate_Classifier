@@ -43,7 +43,7 @@ import re
 import string
 import unicodedata
 from bs4 import BeautifulSoup as bs
-from gensim.utils import any2unicode, any2utf8, decode_htmlentities
+from gensim.utils import any2unicode, decode_htmlentities
 from gensim.parsing import preprocessing as gprocessing
 from candidate_classifier import utils
 
@@ -65,43 +65,43 @@ PUNCT = frozenset(string.punctuation)
 
 
 
-class StringProcessor(object):
-    """This is supposed to be a composition of StringTransformers but
-    because of tokenization yielding a list, this needs to be reworked
-    to do a kind of context-dependant `yield from` possibly using the
-    flatten generator function."""
-    def __init__(self,
-                 string_transformer,
-                 sentence_transformer=None,
-                 token_transformer=None):
-        self.str_transformer = string_transformer
-        self.sent_transformer = sentence_transformer
-        self.tok_transformer = token_transformer
-
-    def __call__(self, s):
-        # Process string
-        processed = self.str_transformer(s)
-
-        # TODO: Fix this and figure our contract
-        # Sentences
-        if self.sent_transformer is not None:
-            sents = self.sent_transformer(s)
-
-            for sent in sents:
-                # Tokens
-                if self.tok_transformer is not None:
-                    sent = self.tok_transformer(sent)
-
-                yield sent
-
-    # def __call__(self, s):
-    #     Yes, I know this is difficult to read.  But this is
-    #     my library and I'll do as I please thank you very much.
-    #     The contract of this reduce operation is essentially this:
-    #     f([a, b, c], 's') ==> c(b(a('s')))
-    #     The reason for the reversal is so that when a user specifies
-    #     the function they want to call first, it can be first in the list.
-        # return reduce(lambda x, y: y(x), self.transformers, s)
+# class StringProcessor(object):
+#     """This is supposed to be a composition of StringTransformers but
+#     because of tokenization yielding a list, this needs to be reworked
+#     to do a kind of context-dependant `yield from` possibly using the
+#     flatten generator function."""
+#     def __init__(self,
+#                  string_transformer,
+#                  sentence_transformer=None,
+#                  token_transformer=None):
+#         self.str_transformer = string_transformer
+#         self.sent_transformer = sentence_transformer
+#         self.tok_transformer = token_transformer
+#
+#     def __call__(self, s):
+#         # Process string
+#         processed = self.str_transformer(s)
+#
+#         # TODO: Fix this and figure our contract
+#         # Sentences
+#         if self.sent_transformer is not None:
+#             sents = self.sent_transformer(s)
+#
+#             for sent in sents:
+#                 # Tokens
+#                 if self.tok_transformer is not None:
+#                     sent = self.tok_transformer(sent)
+#
+#                 yield sent
+#
+#     # def __call__(self, s):
+#     #     Yes, I know this is difficult to read.  But this is
+#     #     my library and I'll do as I please thank you very much.
+#     #     The contract of this reduce operation is essentially this:
+#     #     f([a, b, c], 's') ==> c(b(a('s')))
+#     #     The reason for the reversal is so that when a user specifies
+#     #     the function they want to call first, it can be first in the list.
+#         # return reduce(lambda x, y: y(x), self.transformers, s)
 
 
 
@@ -139,9 +139,9 @@ def is_non_ascii(s):
 
 
 # ========================
-# SUBSTIUTIONS
+# SUBSTITUTIONS
 # ========================
-# Substituations take in a string and return some
+# Substitutions take in a string and return some
 # transformed version of that string.
 
 def strip_html(s):
@@ -174,6 +174,11 @@ def pattern_sub(pattern):
 
 
 
+# ========================
+# StringTransformer
+# ========================
+# TODO: Refactor name to StringTransformer
+
 # TODO:
 # Make a repr that shows the current filters/substitutions being used
 # Add the available built-in filters/substitutions to the docstring
@@ -196,8 +201,7 @@ class TransformerABC(object):
                  # Tokenization always occurs last.
                  # If you want to process the tokens, use another Transformer
                  # tokenizer must be callable
-                 tokenizer=None,
-                 **kwargs):
+                 tokenizer=None):
         self.filters = self._process_filters(filters)
         self.pre_substitutions = self._process_substitutions(prefilter_substitutions)
         self.post_substitutions = self._process_substitutions(postfilter_substitutions)
@@ -335,7 +339,6 @@ class TransformerABC(object):
                     # Dict support?
                     if isinstance(sub[0], self.re_type):
                         # def funcC(sub):
-                        #     # FIXME: Use compiled pattern
                         #     # def func(s): sub[0].sub(sub[1], s)
                         #     def func(s): return re.sub(sub[0], sub[1], s)
                         #     return func
@@ -344,7 +347,6 @@ class TransformerABC(object):
                         t.append(pattern_sub(sub))
                 except IndexError:
                     pass
-
         return t
 
 
