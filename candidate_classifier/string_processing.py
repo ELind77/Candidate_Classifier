@@ -209,7 +209,7 @@ class TransformerABC(object):
         self.tokenizer = tokenizer
 
         # Set processor
-        self.processor = self._flat_process if flatten else self._nested_process
+        # self.processor = self._flat_process if flatten else self._nested_process
 
 
     # FIXME More documnetation for empty string behavior
@@ -350,23 +350,22 @@ class TransformerABC(object):
         return t
 
 
-    def _flat_process(self, s):
-        """Takes in either an iterator or a string and yields strings.
-        Calling this on a nested list will result in a flattened list.
-
-
-        str => str
-        str[] => str[]
-        """
-        for elt in utils.flatten(s):
-            # print elt
-            # Tokenization may add another level of nesting
-            for t in utils.flatten(self._process(elt)):
-                # print t
-                yield t
-
-    def _nested_process(self, s):
-        return utils.nested_map(s, self._process)
+    # def _flat_process(self, s):
+    #     """Takes in either an iterator or a string and yields strings.
+    #     Calling this on a nested list will result in a flattened list.
+    #
+    #     str => str
+    #     str[] => str[]
+    #     """
+    #     for elt in utils.flatten(s):
+    #         # print elt
+    #         # Tokenization may add another level of nesting
+    #         for t in utils.flatten(self._process(elt)):
+    #             # print t
+    #             yield t
+    #
+    # def _nested_process(self, s):
+    #     return utils.nested_map(s, self._process)
 
     def _process(self, s):
         """Takes in a string and returns either a string (no tokenization) or
