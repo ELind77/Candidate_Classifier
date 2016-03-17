@@ -313,15 +313,16 @@ class NgramModel(ModelI):
     # ==================
 
     # This is a new method (not in original nltk model)
-    def prob_seq(self, seq):
+    def prob_seq(self, seq, lg=True):
         """
         Evaluate the probability of a sequence (list of tokens).
 
-        Returns value in logspace to avoid underflows.
-
         :param seq: A list of tokens representing a document/sentence/etc.
         :type seq: list(str)
+        :param lg: If ``log`` is True, returns value in logspace to avoid underflows.
+        :type lg: bool
         :return: float
+        :rtype: float
         """
         prob = 0.0
         for ngram in ngrams(seq, self._n, self._pad_left, self._pad_right,
@@ -329,9 +330,11 @@ class NgramModel(ModelI):
                             right_pad_symbol=self._rpad):
             context = tuple(ngram[:-1])
             token = ngram[-1]
-            prob += self.logprob(token, context)
-
-        return prob
+            if lg:
+                prob += self.logprob(token, context)
+            else:
+                prob += self.prob(token, context)
+        return float(prob)
 
     def prob(self, word, context):
         """
