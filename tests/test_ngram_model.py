@@ -11,6 +11,7 @@ __author__ = 'Eric Lind'
 # TODO:
 # - Calculate probabilities for Lidstone with alpha=0.001 by hand
 # - Test for save/load the model
+# - Test generate, prob, prob_seq
 
 
 DOC1 = ['foo', 'foo', 'foo', 'foo', 'bar', 'baz']
