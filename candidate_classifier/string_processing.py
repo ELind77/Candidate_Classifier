@@ -167,9 +167,9 @@ def strip_accents_ascii(s):
     return nkfd_form.encode('ASCII', 'ignore').decode('ASCII')
 
 
-def pattern_sub(pattern):
+def pattern_sub(pattern, replacement=''):
     def inner(s):
-        return pattern.sub('', s)
+        return pattern.sub(replacement, s)
     return inner
 
 
@@ -344,7 +344,7 @@ class TransformerABC(object):
                         #     return func
                         # t.append(funcC(sub))
                         # t.append(lambda s: re.sub(sub[0], sub[1], s))
-                        t.append(pattern_sub(sub))
+                        t.append(pattern_sub(sub[0], replacement=sub[1]))
                 except IndexError:
                     pass
         return t
