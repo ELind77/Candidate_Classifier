@@ -1,17 +1,21 @@
 from nose import tools as nosey
 from nose.tools import with_setup
-from candidate_classifier.nltk_model import NgramModel
+import itertools
+import math
 from nltk.probability import LaplaceProbDist, LidstoneProbDist, \
     ConditionalFreqDist, ConditionalProbDist
-import itertools
+
+from candidate_classifier.nltk_model import NgramModel
+
 
 __author__ = 'Eric Lind'
 
 
 # TODO:
 # - Calculate probabilities for Lidstone with alpha=0.001 by hand
-# - Test for save/load the model
 # - Test generate, prob, prob_seq
+# - Correctness tests for entropy and perplexity
+# - Test for save/load the model
 
 
 DOC1 = ['foo', 'foo', 'foo', 'foo', 'bar', 'baz']
@@ -20,7 +24,7 @@ def gen_docs():
     for d in DOC1:
         yield d
 
-def test_with_laplace():
+def test_nmodel_gives_correct_prob_with_laplace_smoothing():
     est = LaplaceProbDist
     lm = NgramModel(3, docs=DOC1, estimator=est)
 
@@ -93,6 +97,38 @@ def test_model_can_use_generator_of_list_of_strings():
     nosey.assert_is_instance(lm._backoff._model, ConditionalProbDist)
 
 
+def test_nmodel_prob_returns_float():
+    lm = NgramModel(3, DOC1)
+    nosey.assert_is_instance(lm.prob('bar'), float)
+
+
+def test_nmodel_logprob_returns_float():
+    lm = NgramModel(3, DOC1)
+    nosey.assert_is_instance(lm.logprob('bar'), float)
+
+
+def test_nmodel_logprob_returns_neg_log_of_prob():
+    lm = NgramModel(3, DOC1)
+    prob = lm.prob('bar')
+    logprob = lm.logprob('bar')
+    nosey.assert_almost_equal(-math.log(prob, 2), logprob)
+
+
+def test_generate_returns_list_of_string():
+    lm = NgramModel(3, DOC1)
+    gen = lm.generate(5)
+    nosey.assert_is_instance(gen, list)
+    nosey.assert_is_instance(gen[0], basestring)
+    nosey.assert_equal(len(gen), 5)
+
+def test_choose_random_word_returns_string():
+    lm = NgramModel(3, DOC1)
+    rw = lm.choose_random_word(('foo'))
+
+    nosey.assert_is_instance(rw, basestring)
+
+
+
 # word_seq = ['foo', 'foo', 'foo', 'foo', 'bar', 'baz']
 # word_types = set(word_seq)
 #
@@ -118,11 +154,3 @@ def test_model_can_use_generator_of_list_of_strings():
 # context = ('bar', 'baz',)
 # word = 'foo'
 # print "P(foo | bar, baz) = " + str(model.prob(word, context))
-
-
-
-
-
-
-
-
