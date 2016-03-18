@@ -3,31 +3,27 @@ import unittest
 from candidate_classifier.nltk_model import NgramModel
 from candidate_classifier.nltk_model.ngram_classifier import NgramClassifier
 import ujson
+import os
+import numpy as np
 
 
 __author__ = 'Eric Lind'
 
 # TODO:
-# - Create data just for this test.
-# - Test fit and predict
+# - Test multi-class
 
 
-with open('candidate_classifier/data/processed/processed.json', 'rb') as _f:
-    processed = ujson.load(_f)
+with open(os.path.join('tests', 'data', 'ngram_preprocessed_test_data.json')) as _f:
+    ALL_DATA = ujson.load(_f)
 
-trump_sents = processed['TRUMP']['sents'][:1000]
-trump_labels = ['T']*len(trump_sents)
-hillary_sents = processed['CLINTON']['sents'][:1000]
-hillary_labels = ['H']*len(hillary_sents)
-
-
-data = trump_sents+hillary_sents
-labels = trump_labels + hillary_labels
+BINARY_DATA = ALL_DATA['TRUMP']['sents'][:1000] + ALL_DATA['CLINTON']['sents'][:1000]
+BINARY_LABELS = ([1]*1000) + ([0]*1000)
+TEST_DATA = ALL_DATA['TRUMP']['sents'][1000:1200]
 
 
 def test_ngramclassifier_builds_models():
     c = NgramClassifier()
-    c.fit(data, labels)
+    c.fit(BINARY_DATA, BINARY_LABELS)
 
     nosey.assert_is_instance(c, NgramClassifier)
     nosey.assert_is_instance(c.m1, NgramModel)
@@ -36,9 +32,39 @@ def test_ngramclassifier_builds_models():
 
 def test_ngramclassifier_trains_models():
     c = NgramClassifier()
-    c.fit(data, labels)
+    c.fit(BINARY_DATA, BINARY_LABELS)
 
     nosey.assert_greater(len(c.m1._ngrams), 0)
     nosey.assert_greater(len(c.m2._ngrams), 0)
 
 
+def test_ngramclf_predict_dtype():
+    c = NgramClassifier()
+    c.fit(BINARY_DATA, BINARY_LABELS)
+
+    predictions = c.predict(TEST_DATA)
+    nosey.assert_equal(len(predictions), len(TEST_DATA))
+
+
+def test_ngramclf_get_params():
+    c = NgramClassifier()
+    expected1 = {
+        'n': 4,
+        'alpha': 0.01
+    }
+    expected2 = {
+        'n': c.n,
+        'alpha': c.alpha
+    }
+
+    nosey.assert_dict_equal(c.get_params(), expected1)
+    nosey.assert_dict_equal(c.get_params(), expected2)
+
+
+def test_ngramclf_predict_proba_dtype():
+    c = NgramClassifier()
+    c.fit(BINARY_DATA, BINARY_LABELS)
+
+    probs = c.predict_proba(TEST_DATA)
+    nosey.assert_is_instance(probs, np.ndarray)
+    nosey.assert_equal(probs.shape, (len(TEST_DATA), 2))

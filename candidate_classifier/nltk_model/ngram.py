@@ -16,10 +16,13 @@
 # So far, only lidstone and laplace work.  WrittenBell might work but I haven't
 # tested yet and it's going to be a pain to test by hand.
 
+# Tests for entropy and perplexity?
+# Maybe at least add a decorator with an "untested" warning or something?
+
 
 from __future__ import unicode_literals
 
-from math import log
+import math
 import warnings
 from collections import Sequence, Iterator
 import itertools
@@ -31,6 +34,7 @@ from nltk import compat
 from candidate_classifier.nltk_model.api import ModelI
 
 
+# TODO: Use copy_reg module and figure out how to make this pickleable
 def _estimator(fdist, **estimator_kwargs):
     """
     Default estimator function using a LidstoneProbDist.
@@ -333,7 +337,7 @@ class NgramModel(ModelI):
             prob += self.logprob(token, context)
         return float(prob)
 
-    def prob(self, word, context):
+    def prob(self, word, context=()):
         """
         Evaluate the probability of this word in this context using Katz Backoff.
 
@@ -360,7 +364,7 @@ class NgramModel(ModelI):
         else:
             return 1
 
-    def logprob(self, word, context):
+    def logprob(self, word, context=()):
         """
         Evaluate the (negative) log probability of this word in this context.
 
@@ -369,7 +373,7 @@ class NgramModel(ModelI):
         :param context: the context the word is in
         :type context: list(str)
         """
-        return -log(self.prob(word, context), 2)
+        return -math.log(self.prob(word, context), 2)
 
     def choose_random_word(self, context):
         """
@@ -391,7 +395,6 @@ class NgramModel(ModelI):
         :param context: initial words in generated string
         :type context: list(str)
         """
-
         text = list(context)
         for i in range(num_words):
             text.append(self._generate_one(text))
@@ -432,7 +435,7 @@ class NgramModel(ModelI):
         :param text: words to calculate perplexity of
         :type text: list(str)
         """
-        return pow(2.0, self.entropy(text))
+        return math.pow(2.0, self.entropy(text))
 
     def __contains__(self, item):
         if not isinstance(item, tuple):
