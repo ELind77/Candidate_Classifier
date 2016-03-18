@@ -1,16 +1,20 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 
-
-from math import log
 import warnings
 from nltk.probability import LidstoneProbDist
 import itertools
 from collections import Sequence
 import operator
 import numpy as np
+import math
+import decimal
 
 from candidate_classifier.nltk_model import NgramModel
+
+
+d_ctx = decimal.getcontext()
+d_ctx.prec = 64
 
 
 __author__ = 'Eric Lind'
@@ -123,8 +127,8 @@ class NgramClassifier(object):
         return [self._get_prediction(sent) for sent in X]
 
     def _get_prediction(self, sequence):
-        p1 = self.m1.prob_seq(sequence, lg=False)
-        p2 = self.m2.prob_seq(sequence, lg=False)
+        p1 = self.m1.prob_seq(sequence)
+        p2 = self.m2.prob_seq(sequence)
 
         # Handle 0 for both
         if p1 == p2 == 0:
@@ -134,10 +138,17 @@ class NgramClassifier(object):
         if p2 == 0:
             return self.classes[0]
 
+        # FIXME:
+        # Move out of log space
+        # This seems like a really shitty way to do things, but I'm not really sure
+        # what a better way would be.
+        p1 = d_ctx.power(2, -decimal.Decimal(p1))
+        p2 = d_ctx.power(2, -decimal.Decimal(p2))
+
         # Calculate the ratio of the probability that the sequence has
         # class one given the sequence, to the probability of class2 given
         # the sequence
-        r = (p1 / p2) * self.y_ratio
+        r = (p1 / p2) * decimal.Decimal(self.y_ratio)
 
         if r > 1:
             return self.classes[0]

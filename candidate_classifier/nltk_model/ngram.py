@@ -313,7 +313,7 @@ class NgramModel(ModelI):
     # ==================
 
     # This is a new method (not in original nltk model)
-    def prob_seq(self, seq, lg=True):
+    def prob_seq(self, seq):
         """
         Evaluate the probability of a sequence (list of tokens).
 
@@ -330,10 +330,7 @@ class NgramModel(ModelI):
                             right_pad_symbol=self._rpad):
             context = tuple(ngram[:-1])
             token = ngram[-1]
-            if lg:
-                prob += self.logprob(token, context)
-            else:
-                prob += self.prob(token, context)
+            prob += self.logprob(token, context)
         return float(prob)
 
     def prob(self, word, context):
