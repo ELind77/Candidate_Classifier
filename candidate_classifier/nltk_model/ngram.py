@@ -74,14 +74,15 @@ class NgramModel(ModelI):
             ... # doctest: +ELLIPSIS
             12.0399...
 
-        NB: If a ``bins`` parameter is given in teh ``estimator_kwargs``
+        NB: If a ``bins`` parameter is given in the ``estimator_kwargs``
         it will be ignored.  The number of bins to use is the number of
         outcomes (tokens) encountered at each level of the backoff recursion
         and as such, the number must change each time.
 
         :param n: the order of the language model (ngram size)
         :type n: int
-        :param docs: the training text
+        :param docs: the training text.  This needs to be a list, tuple, generator,
+            or an iterable that yields such.
         :type docs: list(str) or list(list(str))
         :param pad_left: whether to pad the left of each sentence with an (n-1)-gram of empty strings
         :type pad_left: bool
@@ -100,6 +101,7 @@ class NgramModel(ModelI):
         assert(isinstance(pad_left, bool))
         assert(isinstance(pad_right, bool))
 
+
         # Check for bins argument
         if 'bins' in estimator_kwargs:
             warnings.warn('A value was provided for the `bins` parameter of '
@@ -109,6 +111,7 @@ class NgramModel(ModelI):
             # Clear out the bins so we don't throw recursive warnings
             estimator_kwargs.pop('bins', None)
 
+        # TODO: I never understood why this used an ngram to do the actual padding
         self._lpad = ('',) * (n - 1) if pad_left else ()
         self._rpad = ('',) * (n - 1) if pad_right else ()
         self._pad_left = pad_left
@@ -140,18 +143,18 @@ class NgramModel(ModelI):
         # ===================
         # Check Docs
         # ===================
-        # FIXME: More robust check?
         # I think it's important that the model be able to train on a one-use generator
         # so that it can train on corpora that don't fit in RAM. This requires some robust
         # type-checking though.  What's below could use some improvement, but seems to work
         # for now.
 
-        # Docs need to be able to be a list, tuple, or generator,
-        # or an iterable that yields such (CorpusView?)
-        # If given a list of strings instead of a list of lists, create enclosing list
+        # TODO: test with CorpusView
+        # Docs needs to be able to be a list, tuple, generator, or an iterable that yields
+        # such (CorpusView?).
 
-        # NB: The Iterator type won't catch lists, or strings, but it will catch things returned
-        # by functions in itertools
+        # If given a list of strings instead of a list of lists, create enclosing list
+        # NB: The Iterator type won't catch lists, or strings, but it will catch things
+        # returned by functions in itertools
         if isinstance(docs, GeneratorType) or isinstance(docs, Iterator):
             nxt = docs.next()
             # Either it's a string or a list of string
@@ -194,7 +197,7 @@ class NgramModel(ModelI):
 
         # Train the model
         for sent in docs:
-            self._train(sent)
+            self.train(sent)
 
         # Build model and set the backoff parameters
         if len(self.outcomes) > 0:
@@ -211,18 +214,24 @@ class NgramModel(ModelI):
     # (tokens) encountered while training.  This means that it needs
     # to be recalculated at each level of the recursion.
     # NB: For the unigram case, this would be the actual vocabulary size
-    def _train(self, sent):
+    def train(self, sent):
+        """
+        Train this model and the backoff model on the given setnence
+        :param sent: A list of items to train on
+        :type sent: list
+        :return: None
+        """
         # FIXME: This may use extra memory, but because python 2.7 doesn't
         # support deepcopy for generators, I'm not sure what else to do...
         if isinstance(sent, GeneratorType) or isinstance(sent, Iterator):
             s1, s2 = itertools.tee(sent, 2)
             self._train_one(s1)
             if self._backoff is not None:
-                self._backoff._train(s2)
+                self._backoff.train(s2)
         else:
             self._train_one(sent)
             if self._backoff is not None:
-                self._backoff._train(sent)
+                self._backoff.train(sent)
 
 
     # FIXME: Discard cfd after training?
@@ -244,15 +253,29 @@ class NgramModel(ModelI):
     # ===================
     # CREATE MODEL
     # ===================
-    # Even if the number of bins is explicitly passed, we should use the number
+    # NB: Even if the number of bins is explicitly passed, we should use the number
     # of word types encountered during training as the bins value.
     # If right padding is on, this includes the padding symbol.
     #
-    # NB: There is a good reason for this!  If the number of bins isn't set the
+    # There is a good reason for this!  If the number of bins isn't set the
     # ConditionalProbDist will choose from a different total number of possible
     # outcomes for each condition and the NgramModel won't give probability
     # estimates that sum to 1.
     def _build_model(self, estimator, estimator_kwargs):
+        """
+        Construct the ``ConditionalProbDist`` used to estimate probabilities.
+
+        This should only be called after the model has been trained. If
+        additional training is performed, this should be called again.
+
+        :param estimator: A callable that returns something that extends
+            ProbDistI. Used to map the frequency of a condition to its
+            probability. The only estimator that currently work are
+            ``LidstoneProbDist`` and ``LaplaceProbDist``.
+        :param estimator_kwargs: Additional arguments to pass to the estimator.
+            If ``bins`` is in here it will be overridden.
+        :return: None
+        """
         n_outcomes = len(self.outcomes)
         if n_outcomes <= 0:
             raise Exception("NgramModel can't build a model without training input!")
@@ -275,14 +298,14 @@ class NgramModel(ModelI):
     # SET BACKOFF PARAMS
     # ===================
     def _set_backoff_params(self):
+        """
+        Sets the alphas for the backoff models used to calculate
+        the probability for unseen ngrams.
+
+        :return: None
+        """
         # Construct parameters for
         if not self._unigram_model:
-            # self._backoff = NgramModel(n-1,
-            #                            docs,
-            #                            pad_left, pad_right,
-            #                            estimator,
-            #                            **estimator_kwargs)
-
             self._backoff_alphas = dict()
             # For each condition (or context)
             for ctxt in self._cfd.conditions():
@@ -321,11 +344,17 @@ class NgramModel(ModelI):
         """
         Evaluate the probability of a sequence (list of tokens).
 
+        The probability of a sequence is the product of the probabilities
+        of all of the ngrams in that sequence.  Because these probabilities
+        can be very small underflow errors are common with long sequences.
+        In order to avoid underflows, a common approach is to do all of
+        the calculations in (negative) log-space and take advantage of the
+        properties of logs to transform the calculation into a sum. That
+        is the approach used here.
+
         :param seq: A list of tokens representing a document/sentence/etc.
         :type seq: list(str)
-        :param lg: If ``log`` is True, returns value in logspace to avoid underflows.
-        :type lg: bool
-        :return: float
+        :return: The negative log probabilitiy of the given sequence
         :rtype: float
         """
         prob = 0.0
@@ -347,7 +376,7 @@ class NgramModel(ModelI):
         :type context: list(str)
         """
         context = tuple(context)
-        if (context + (word,) in self._ngrams) or (self._unigram_model):
+        if (context + (word,) in self._ngrams) or self._unigram_model:
             return self[context].prob(word)
         else:
             return self._alpha(context) * self._backoff.prob(word, context[1:])
@@ -380,7 +409,7 @@ class NgramModel(ModelI):
         Randomly select a word that is likely to appear in this context.
 
         :param context: the context the word is in
-        :type context: list(str)
+        :type context: list(str)|tuple(str)
         """
         return self.generate(1, context)[-1]
 
@@ -393,7 +422,7 @@ class NgramModel(ModelI):
         :param num_words: number of words to generate
         :type num_words: int
         :param context: initial words in generated string
-        :type context: list(str)
+        :type context: list(str)|tuple(str)
         """
         text = list(context)
         for i in range(num_words):

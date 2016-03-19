@@ -21,9 +21,8 @@ PROCESSED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               'candidate_classifier', 'data', 'processed', 'processed.json')
 
 FILE_PATTERN = '.*\.txt'
-CANDIDATES = ['BUSH', 'CARSON', 'CHRISTIE', 'CRUZ', 'FIORINA', 'KASICH', 'PAUL', 'RUBIO', 'TRUMP',
-              'CLINTON', 'SANDERS']
-NLP = English(entity=False, tagger=False, load_vectors=False)
+CANDIDATES = ['BUSH', 'CARSON', 'CHRISTIE', 'CRUZ', 'KASICH', 'RUBIO', 'TRUMP', 'CLINTON', 'SANDERS']
+NLP = English(entity=False, load_vectors=False)
 
 BRACKET_PATTERN = re.compile(r"\[[a-zA-Z ]*\]", re.U)
 SPACED_ELLIPSIS_PATTERN = re.compile(r"((?:\.\s){3})")

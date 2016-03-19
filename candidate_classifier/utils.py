@@ -3,6 +3,7 @@
 import os
 import random
 from nltk.corpus.reader.util import ConcatenatedCorpusView
+import itertools
 
 __author__ = 'Eric Lind'
 
@@ -123,3 +124,23 @@ def nested_map(root, func):
 
     except TypeError:
         return func(root)
+
+
+# Borrowed from gensim
+def chunked(iterable, chunksize):
+    """
+    Return elements from the iterable in `chunksize`-ed lists. The last returned
+    element may be smaller (if length of collection is not divisible by `chunksize`).
+
+    >>> print(list(chunked(range(10), 3)))
+    [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9]]
+
+    """
+    it = iter(iterable)
+    c = int(chunksize)
+    while True:
+        wrapped_chunk = [list(itertools.islice(it, c))]
+        if not wrapped_chunk[0]:
+            break
+        # memory opt: wrap the chunk and then pop(), to avoid leaving behind a dangling reference
+        yield wrapped_chunk.pop()

@@ -243,7 +243,7 @@ class TransformerABC(object):
     def _process_filters(self, filts):
         """
         Filters are functions that return booleans.  If a function
-        resturns True (or some truthy value) for a given string,
+        returns True (or some truthy value) for a given string,
         that string is filtered out.
         """
         t = []

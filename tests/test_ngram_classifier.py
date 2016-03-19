@@ -11,6 +11,8 @@ __author__ = 'Eric Lind'
 
 # TODO:
 # - Test multi-class
+# - Generators as input
+# - pad-ngrams
 
 
 with open(os.path.join('tests', 'data', 'ngram_preprocessed_test_data.json')) as _f:
@@ -45,16 +47,17 @@ def test_ngramclf_predict_dtype():
     predictions = c.predict(TEST_DATA)
     nosey.assert_equal(len(predictions), len(TEST_DATA))
 
-
 def test_ngramclf_get_params():
     c = NgramClassifier()
     expected1 = {
         'n': 4,
-        'alpha': 0.01
+        'alpha': 0.01,
+        'pad_ngrams': False
     }
     expected2 = {
         'n': c.n,
-        'alpha': c.alpha
+        'alpha': c.alpha,
+        'pad_ngrams': c.pad_ngrams
     }
 
     nosey.assert_dict_equal(c.get_params(), expected1)
