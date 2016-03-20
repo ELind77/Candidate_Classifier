@@ -23,7 +23,7 @@ __author__ = 'Eric Lind'
 # - Use word shapes
 # - Experiment with replacing OOV words with brown cluster
 # - WordNet WSD tokenizer
-#   - That's kinda mor like a transformer though.
+#   - That's kinda more like a transformer though.
 
 
 nlp = English(load_vectors=False)
