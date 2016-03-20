@@ -216,7 +216,8 @@ class NgramModel(ModelI):
     # NB: For the unigram case, this would be the actual vocabulary size
     def train(self, sent):
         """
-        Train this model and the backoff model on the given setnence
+        Train this model and the backoff model on the given sentence.
+
         :param sent: A list of items to train on
         :type sent: list
         :return: None

@@ -1,12 +1,19 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 
+"""
+A scikit-learn compatible classifier using an n-gram language model.
+
+The base NgramClassifier is only a binary classifier.  For multi-class
+problems use NgramClassifierMulti.
+"""
+
 import warnings
 from nltk.probability import LidstoneProbDist
-import itertools
 from collections import Sequence, Iterable, Iterator
 import numpy as np
 from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.multiclass import OneVsOneClassifier, _predict_binary
 
 from candidate_classifier.nltk_model import NgramModel
 from candidate_classifier import utils
@@ -18,6 +25,8 @@ __author__ = 'Eric Lind'
 # TODO: Different estimators
 # - Good-Turing is screwed so that's out
 # - WrittenBell should be fine though
+# - make NgramClassifier a base class and use NgramMulti as the main class
+
 
 def make_estimator(alpha):
     def est(fdist, bins):
@@ -73,6 +82,8 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         self.n_y2 = 0
         self.y1_prob = 0
         self.y2_prob = 0
+        self.y_probs = np.zeros(2)
+        self.y_log_probs = np.zeros(2)
         self.y_ratio = 0
 
     # FIXME: y needs to be a list, but what if it's HUGE?
@@ -106,6 +117,7 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         #     raise ValueError("No classes specified for NGram Classifier.  This class "
         #                      "requires exactly two classes to be specified.")
         # FIXME: y can't be a generator...
+        # NB: unique sorts the output (but that's a good thing)
         uniqs = np.unique(y, return_counts=True)
         self.classes = uniqs[0]
         self.n_y1 = uniqs[1][0]
@@ -122,6 +134,8 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         # Should be y1/y2
         self.y1_prob = np.float64(self.n_y1) / np.float64(self.n_y1 + self.n_y2)
         self.y2_prob = np.float64(self.n_y2) / np.float64(self.n_y1 + self.n_y2)
+        self.y_probs = np.asarray([self.y1_prob, self.y2_prob], dtype=np.float64)
+        self.y_log_probs = np.log2(self.y_probs)
         self.y_ratio = self.y1_prob / self.y2_prob
 
         # Build models
@@ -189,17 +203,31 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
     def _get_prediction(self, sequence):
         r = self._calc_prob_ratio(sequence)
 
-        if r > 1:
+        # FIXME: Tie breaker?
+        # I handle this in calculating the ratio, but it would be good to be more
+        # explicit about it.  And it only handles the case where both are 0
+
+        # NB: The ratio is calculated in log-space
+        # so the threshold for decision-making is 0, not 1
+        if r > 0:
             return self.classes[0]
         else:
             return self.classes[1]
 
+        # if r > 1:
+        #     return self.classes[0]
+        # else:
+        #     return self.classes[1]
+
     def _calc_prob_ratio(self, sequence):
         """Calculates the ratio of the tow class probabilities"""
-        p1 = self.m1.prob_seq(sequence)
-        p2 = self.m2.prob_seq(sequence)
+        # Get the negative log probabilities
+        p1 = -self.m1.prob_seq(sequence)
+        p2 = -self.m2.prob_seq(sequence)
 
         # Handle 0 for both
+        # This is actually the tie-breaking rule...
+        # TODO: Return 0 for ties and handle tie-breaking in get_prediction
         if p1 == p2 == 0:
             # FIXME: Refactor this
             # Return a random value based on training data frequency
@@ -207,22 +235,27 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
             if choice == self.classes[0]:
                 return 2.0
             else:
-                return 0.1
+                return -0.1
         # Handle division by zero
+        # FIXME: Do I still need this in log-space?
         if p2 == 0:
             # If only the second class has zero probability, return a ratio
-            # value greater than 1 so the first class is picked
+            # value greater than 0 so the first class is picked
             return 2.0
 
-        # Move out of log space
-        # If there's a better way to do this, I'm not sure what it is
-        p_arr = np.power(np.array([2.0, 2.0], dtype=np.float128),
-                         np.array([-p1, -p2], dtype=np.float128))
+        # Calculate the ratio of the probability that the sequence has
+        # class one given the sequence, to the probability of class2 given
+        # the sequence.
+        # Calculate the ratio using log rules:
+        # r = (p1/p2) - (py1/py2) becomes this in log space:
+        return (p1 - p2) + (self.y_log_probs[0] - self.y_log_probs[1])
 
         # Calculate the ratio of the probability that the sequence has
         # class one given the sequence, to the probability of class2 given
         # the sequence
-        return ((p_arr / p_arr[1]) * self.y_ratio)[0]
+        # p1 = np.exp2(-self.m1.prob_seq(sq))
+        # p2 = np.exp2(-self.m2.prob_seq(sq))
+        # return (p1/p2) * classifier.y_ratio
 
 
     # FIXME: Better documentation explanation
@@ -237,31 +270,168 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
     def predict_proba(self, X):
         """
         Returns probability estimates for each value in X.
+        Return value has shape (n_samples, 2)
         """
-        out = []
-        for s in X:
-            s_probs = self._get_probs(s)
-            y_probs = np.asarray([self.y1_prob, self.y2_prob], dtype=np.float64)
-            c_probs = s_probs * y_probs
-            # NB: I tried multiple normalizations for c_probs:
-            # - raw, no normalization
-            # - Forcing sum to one by dividing by sum
-            # - Setting chosen prob to 1 by dividing by max
-            # Forcing sum to 1 performed terribly in evaluation.
-            # Setting the chosen prob := 1 scored marginally (~0.01 weighted f1)
-            # better, than raw scores, but as the purpose is to break ties, it
-            # seemed a bit silly to just give 1 as the predicted probability
-            # so I just stuck with the raw scores.
-            out.append(c_probs)
-        return np.asarray(out, dtype=np.float64)
+        # NB: I tried multiple normalizations for c_probs:
+        # - raw, no normalization
+        # - Forcing sum to one by dividing by sum
+        # - Setting chosen prob to 1 by dividing by max
+        # Forcing sum to 1 performed terribly in evaluation.
+        # Setting the chosen prob := 1 scored marginally (~0.01 weighted f1)
+        # better, than raw scores, but as the purpose is to break ties, it
+        # seemed a bit silly to just give 1 as the predicted probability
+        # so I just stuck with the raw scores.
+        # return np.asarray([self._get_probs(s) * self.y_probs for s in X])
+        return np.exp2(self.predict_log_proba(X))
+        # probs = self.predict_log_proba(X)
+        # Normalize by (dividing by) sum of probabilities
+        # return np.exp2(probs - np.atleast_2d(logsumexp2(probs, axis=1)).T)
 
-
+    # TODO: Don't think I need this any more
     def _get_probs(self, seq):
         p1 = self.m1.prob_seq(seq)
         p2 = self.m2.prob_seq(seq)
 
         # Move out of log space
-        # If there's a better way to do this, I'm not sure what it is
-        p_arr = np.power(np.array([2.0, 2.0], dtype=np.float128),
-                         np.array([-p1, -p2], dtype=np.float128))
+        p_arr = np.exp2(np.array([-p1, -p2], dtype=np.float128))
         return p_arr
+
+    def _get_log_probs(self, seq):
+        """Get the negative log probabilities for a sequence"""
+        # NB: NgramModel returns negative log probs
+        return np.negative(np.asarray([self.m1.prob_seq(seq), self.m2.prob_seq(seq)],
+                                      dtype=np.float128))
+
+    def predict_log_proba(self, X):
+        """Returns the log probabilities of the samples.
+
+        Should return an array of shape: (n_samples, 2)
+        """
+        # Use log properties to multiply the two numbers
+        return np.asarray([self._get_log_probs(s) + self.y_log_probs for s in X],
+                          dtype=np.float128)
+
+
+
+class NgramClassifierMulti(OneVsOneClassifier):
+    """Multi-class classifier using an n-gram language model as
+    an estimator and an One vs One approach for multi-class classification"""
+
+    def __init__(self, n=4, alpha=0.01, pad_ngrams=False):
+        """
+        :param n: The degree of the NgramModel
+        :type n: int
+        :param alpha: The additive smoothing parameter for the distribution of unseen
+            events.  Defaults to 0.01.  If 1 is specified, you're getting Laplace
+            smoothing, anything else is Lidstone.  It is a good idea to tune this
+            parameter.
+        :type alpha: float
+        :param pad_ngrams: Whether to add additional padding to sentences when making ngrams
+            in order to give more context to the documents.
+        :type pad_ngrams: bool
+        """
+        # Check params
+        if n > 6:
+            warnings.warn("You have specified an n-gram degree greater than 6."
+                          "be aware that this is likely to use a lot of memory, "
+                          "and may result in overfitting your data.")
+        if alpha < 0:
+            raise ValueError("Negative value given for alpha parameter. "
+                             "[A]lpha must be greater than 0.")
+        self.n = n
+        self.alpha = alpha
+        self.pad_ngrams = pad_ngrams
+
+        # TODO: Multi-threaded
+        super(NgramClassifierMulti, self).__init__(NgramClassifier(n=n,
+                                                                   alpha=alpha,
+                                                                   pad_ngrams=pad_ngrams),
+                                                   n_jobs=1)
+
+    def predict_proba(self, X):
+        """
+        Returns probability estimates for each value in X.
+
+        For now, just going with the average, though I'm not really convinced
+        that's the best approach yet.
+
+        X is an array with n-samples rows
+
+        :returns: An array of shape (n_samples, n_classes)
+            Returns the probability of the samples for each class in
+            the model. The columns correspond to the classes in sorted
+            order, as they appear in the attribute `classes_`.
+        """
+        # probs = self._get_probs(X, False)
+        # return (probs.sum(0) / (len(self.classes_) - 1)).T
+        return np.exp2(self.predict_log_proba(X))
+
+    def predict_log_proba(self, X):
+        probs = self._get_probs(X, True)
+        # Caclulate the average while in logspace by dividing (subtracting)
+        # the number of non-zero values in each column
+        return (logsumexp2(probs, axis=0) - (len(self.classes_) - 1)).T
+
+
+    def _get_probs(self, X, lg):
+        """
+        :param X:
+        :param lg: If True, use log probabilities
+        :type lg: bool
+        :return: array (n_estimators, n_classes, n_estimators)
+        """
+        # Need to create an array (n_classes, n_samples)
+        # Populate an array (n_estimators, n_classes, n_samples)
+        # and taking the mean along axis 0
+        # I do this by creating a list of tuples where each tuple corresponds to
+        # a result from model.predict_proba and the values in the tuple are the
+        # columns those predictions should go in the probs array.
+        # You have to think about it in 3D fo it to really make any sense, but
+        # the idea is to take this list of 2D arrays and put each column from those
+        # 2D arrays into the right "stack" (depth column) of the probs array.
+        n_estimators = len(self.estimators_)
+        n_classes = len(self.classes_)
+        idxs = [(i, j) for i in range(n_classes) for j in range(i + 1, n_classes)]
+        if lg:
+            confidences = [est.predict_log_proba(X) for est in self.estimators_]
+        else:
+            confidences = [est.predict_proba(X) for est in self.estimators_]
+
+        # FIXME: make sparse?
+        probs = np.zeros((n_estimators, n_classes, X.shape[0]), dtype=np.float128)
+
+        # Populate the probs array
+        for i, c in enumerate(confidences):
+            tup = idxs[i]
+            for j, col in enumerate(tup):
+                probs[i, col, :] = c[:, j]
+
+        return probs
+
+
+# Borrowed from sklearn so I could change the exponent base
+# TODO: switch everything to base e and use scipy logsumexp
+def logsumexp2(arr, axis=0):
+    """Computes the sum of arr assuming arr is in the log domain.
+
+    Returns log(sum(exp(arr))) while minimizing the possibility of
+    over/underflow.
+
+    Examples
+    --------
+
+    >>> import numpy as np
+    >>> from sklearn.utils.extmath import logsumexp
+    >>> a = np.arange(10)
+    >>> np.log(np.sum(np.exp(a)))
+    9.4586297444267107
+    >>> logsumexp(a)
+    9.4586297444267107
+    """
+    arr = np.rollaxis(arr, axis)
+    # Use the max to normalize, as with the log this is what accumulates
+    # the less errors
+    vmax = arr.max(axis=0)
+    out = np.log(np.sum(np.exp2(arr - vmax), axis=0))
+    out += vmax
+    return out
