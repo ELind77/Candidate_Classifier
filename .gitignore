@@ -67,5 +67,7 @@ target/
 #
 # This Project
 #
-
-
+/Notebooks/nbsvm
+/Notebooks/nbsvm2
+/scikit-learn
+/Notebooks/nbsvm_run
