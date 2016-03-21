@@ -365,7 +365,7 @@ class NgramModel(ModelI):
             context = tuple(ngram[:-1])
             token = ngram[-1]
             prob += self.logprob(token, context)
-        return float(prob)
+        return prob
 
     def prob(self, word, context=()):
         """

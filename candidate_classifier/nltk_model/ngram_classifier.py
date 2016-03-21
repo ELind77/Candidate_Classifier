@@ -162,8 +162,8 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
                 try:
                     lbl = y_itr.next()
                 except StopIteration:
-                    raise ValueError("Labels and training data for NgramClassifier were of unequal "
-                                     "length")
+                    raise ValueError("Labels and training data for NgramClassifier were "
+                                     "of unequal length.")
                 # TODO: This basically acts like OneVsRest...
                 if lbl == self.classes[0]:
                     b1.append(d)
@@ -307,14 +307,15 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
 
         Should return an array of shape: (n_samples, 2)
         """
-        # Use log properties to multiply the two numbers
+        # Use log properties to multiply the two probabilities in log-space
         return np.asarray([self._get_log_probs(s) + self.y_log_probs for s in X],
                           dtype=np.float128)
 
 
 
 class NgramClassifierMulti(OneVsOneClassifier):
-    """Multi-class classifier using an n-gram language model as
+    """
+    Multi-class classifier using an n-gram language model as
     an estimator and an One vs One approach for multi-class classification"""
 
     def __init__(self, n=4, alpha=0.01, pad_ngrams=False):
@@ -367,13 +368,13 @@ class NgramClassifierMulti(OneVsOneClassifier):
         return np.exp2(self.predict_log_proba(X))
 
     def predict_log_proba(self, X):
-        probs = self._get_probs(X, True)
+        probs = self._get_probs(X)
         # Caclulate the average while in logspace by dividing (subtracting)
         # the number of non-zero values in each column
         return (logsumexp2(probs, axis=0) - (len(self.classes_) - 1)).T
 
 
-    def _get_probs(self, X, lg):
+    def _get_probs(self, X):
         """
         :param X:
         :param lg: If True, use log probabilities
@@ -392,10 +393,9 @@ class NgramClassifierMulti(OneVsOneClassifier):
         n_estimators = len(self.estimators_)
         n_classes = len(self.classes_)
         idxs = [(i, j) for i in range(n_classes) for j in range(i + 1, n_classes)]
-        if lg:
-            confidences = [est.predict_log_proba(X) for est in self.estimators_]
-        else:
-            confidences = [est.predict_proba(X) for est in self.estimators_]
+        confidences = [est.predict_log_proba(X) for est in self.estimators_]
+        # else:
+        #     confidences = [est.predict_proba(X) for est in self.estimators_]
 
         # FIXME: make sparse?
         probs = np.zeros((n_estimators, n_classes, X.shape[0]), dtype=np.float128)
@@ -407,6 +407,7 @@ class NgramClassifierMulti(OneVsOneClassifier):
                 probs[i, col, :] = c[:, j]
 
         return probs
+
 
 
 # Borrowed from sklearn so I could change the exponent base
@@ -432,6 +433,15 @@ def logsumexp2(arr, axis=0):
     # Use the max to normalize, as with the log this is what accumulates
     # the less errors
     vmax = arr.max(axis=0)
-    out = np.log(np.sum(np.exp2(arr - vmax), axis=0))
+    # I have no idea what the vmax really does, but I do know that when 
+    # the input matrix is sparse, this will mess up because log(0) = 1 and 
+    # all of those ones will be included in the sum.
+    e_arr = np.exp2(arr - vmax)
+    # Set ones back to 0 for the sum
+    e_arr[arr == 0.0] = 0
+    # Finish the calculation
+    out = np.log2(np.sum(e_arr, axis=0))
+    # out = np.log2(np.sum(np.exp2(arr - vmax), axis=0))
     out += vmax
     return out
+
