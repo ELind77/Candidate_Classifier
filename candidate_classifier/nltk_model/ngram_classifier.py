@@ -135,7 +135,7 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         self.y_probs = np.asarray([self.y1_prob, self.y2_prob], dtype=np.float64)
         self.y_log_probs = np.log2(self.y_probs)
         self.y_ratio = self.y1_prob / self.y2_prob
-        self.y_log_ratio = np.log2(self.y1_prob/self.y2_prob)
+        self.y_log_ratio = np.log2(self.y1_prob / self.y2_prob)
 
         # Build models
         self.m1 = NgramModel(self.n,
@@ -208,56 +208,14 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
 
         # NB: The ratio is calculated in log-space
         # so the threshold for decision-making is 0, not 1
-        # if r > 0:
-        #     return self.classes[0]
-        # else:
-        #     return self.classes[1]
-
-        if r > 1:
+        if r > 0:
             return self.classes[0]
         else:
             return self.classes[1]
-
-    # def _calc_prob_ratio(self, sequence):
-    #     """Calculates the ratio of the tow class probabilities"""
-    #     # Get the negative log probabilities
-    #     # NB: ngram model returns negative log probability so need to
-    #     # make negative to get the actual log probability
-    #     p1 = np.float128(-self.m1.prob_seq(sequence))
-    #     p2 = np.float128(-self.m2.prob_seq(sequence))
-    #
-    #     # Handle 0 for both
-    #     # This is actually the tie-breaking rule...
-    #     # TODO: Return 0 for ties and handle tie-breaking in get_prediction
-    #     if p1 == p2 == 0:
-    #         # FIXME: Refactor this
-    #         # Return a random value based on training data frequency
-    #         choice = np.random.choice(self.classes, 1, p=[self.y1_prob, self.y2_prob])[0]
-    #         if choice == self.classes[0]:
-    #             return 2.0
-    #         else:
-    #             return -0.1
-    #     # Handle division by zero
-    #     # FIXME: Do I still need this in log-space?
-    #     if p2 == 0:
-    #         # If only the second class has zero probability, return a ratio
-    #         # value greater than 0 so the first class is picked
-    #         return 2.0
-    #
-    #     # Calculate the ratio of the probability that the sequence has
-    #     # class one given the sequence, to the probability of class2 given
-    #     # the sequence.
-    #     # Calculate the ratio using log rules:
-    #     # r = (p1/p2) * (py1/py2) becomes this in log space:
-    #     # log(r) = log((p1*py1)/(p2*py2))
-    #     return (p1 - p2) + self.y_log_ratio
-    #
-    #     # Calculate the ratio of the probability that the sequence has
-    #     # class one given the sequence, to the probability of class2 given
-    #     # the sequence
-    #     # p1 = np.exp2(-self.m1.prob_seq(sq))
-    #     # p2 = np.exp2(-self.m2.prob_seq(sq))
-    #     # return (p1/p2) * self.y_ratio
+        # if r > 1:
+        #     return self.classes[0]
+        # else:
+        #     return self.classes[1]
 
     def _calc_prob_ratio(self, sequence):
         """Calculates the ratio of the tow class probabilities"""
@@ -268,7 +226,10 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         p2 = np.float128(-self.m2.prob_seq(sequence))
 
         # Handle 0 for both
+        # This is actually the tie-breaking rule...
+        # TODO: Return 0 for ties and handle tie-breaking in get_prediction
         if p1 == p2 == 0:
+            # FIXME: Refactor this
             # Return a random value based on training data frequency
             choice = np.random.choice(self.classes, 1, p=[self.y1_prob, self.y2_prob])[0]
             if choice == self.classes[0]:
@@ -276,6 +237,8 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
             else:
                 return -0.1
         # Handle division by zero
+        # FIXME: Do I still need this in log-space?
+        # No, but it's nice to have
         if p2 == 0:
             # If only the second class has zero probability, return a ratio
             # value greater than 0 so the first class is picked
@@ -283,10 +246,18 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
 
         # Calculate the ratio of the probability that the sequence has
         # class one given the sequence, to the probability of class2 given
+        # the sequence.
+        # Calculate the ratio using log rules:
+        # r = (p1/p2) * (py1/py2) becomes this in log space:
+        # log(r) = log((p1*py1)/(p2*py2))
+        return (p1 - p2) + self.y_log_ratio
+
+        # Calculate the ratio of the probability that the sequence has
+        # class one given the sequence, to the probability of class2 given
         # the sequence
-        p1 = np.exp2(p1)
-        p2 = np.exp2(p2)
-        return (p1/p2) * self.y_ratio
+        # p1 = np.exp2(-self.m1.prob_seq(sq))
+        # p2 = np.exp2(-self.m2.prob_seq(sq))
+        # return (p1/p2) * self.y_ratio
 
     # FIXME: Better documentation explanation
     # The better way to accurately estimate these probabilities would be to find a
@@ -311,20 +282,19 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         # better, than raw scores, but as the purpose is to break ties, it
         # seemed a bit silly to just give 1 as the predicted probability
         # so I just stuck with the raw scores.
-        return np.asarray([self._get_probs(s) * self.y_probs for s in X])
-        # return np.exp2(self.predict_log_proba(X))
+        # return np.asarray([self._get_probs(s) * self.y_probs for s in X])
+        return np.exp2(self.predict_log_proba(X))
         # probs = self.predict_log_proba(X)
         # Normalize by (dividing by) sum of probabilities
         # return np.exp2(probs - np.atleast_2d(logsumexp2(probs, axis=1)).T)
 
     # TODO: Don't think I need this any more
-    def _get_probs(self, seq):
-        p1 = self.m1.prob_seq(seq)
-        p2 = self.m2.prob_seq(seq)
-
-        # Move out of log space
-        p_arr = np.exp2(np.array([-p1, -p2], dtype=np.float128))
-        return p_arr
+    # def _get_probs(self, seq):
+    #     p1 = self.m1.prob_seq(seq)
+    #     p2 = self.m2.prob_seq(seq)
+    #     # Move out of log space
+    #     p_arr = np.exp2(np.array([-p1, -p2], dtype=np.float128))
+    #     return p_arr
 
     def _get_log_probs(self, seq):
         """Get the negative log probabilities for a sequence"""
@@ -334,7 +304,6 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
 
     def predict_log_proba(self, X):
         """Returns the log probabilities of the samples.
-
         Should return an array of shape: (n_samples, 2)
         """
         # Use log properties to multiply the two probabilities in log-space
@@ -393,13 +362,13 @@ class NgramClassifierMulti(OneVsOneClassifier):
             the model. The columns correspond to the classes in sorted
             order, as they appear in the attribute `classes_`.
         """
-        # probs = self._get_probs(X, False)
+        # probs = self._get_probs(X)
         # return (probs.sum(0) / (len(self.classes_) - 1)).T
         return np.exp2(self.predict_log_proba(X))
 
     def predict_log_proba(self, X):
         probs = self._get_probs(X)
-        # Caclulate the average while in logspace by dividing (subtracting)
+        # Calculate the average while in logspace by dividing (subtracting)
         # the number of non-zero values in each column
         return (logsumexp2(probs, axis=0) - (len(self.classes_) - 1)).T
 
@@ -424,8 +393,6 @@ class NgramClassifierMulti(OneVsOneClassifier):
         n_classes = len(self.classes_)
         idxs = [(i, j) for i in range(n_classes) for j in range(i + 1, n_classes)]
         confidences = [est.predict_log_proba(X) for est in self.estimators_]
-        # else:
-        #     confidences = [est.predict_proba(X) for est in self.estimators_]
 
         # FIXME: use scipy sparse?
         probs = np.zeros((n_estimators, n_classes, X.shape[0]), dtype=np.float128)
@@ -441,6 +408,7 @@ class NgramClassifierMulti(OneVsOneClassifier):
 
 
 # Borrowed from sklearn so I could change the exponent base
+# and fix issues with sparse matrices
 # TODO: switch everything to base e and use scipy logsumexp
 def logsumexp2(arr, axis=0):
     """Computes the sum of arr assuming arr is in the log domain.
@@ -474,4 +442,3 @@ def logsumexp2(arr, axis=0):
     # out = np.log2(np.sum(np.exp2(arr - vmax), axis=0))
     out += vmax
     return out
-

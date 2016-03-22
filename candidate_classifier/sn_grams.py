@@ -127,10 +127,6 @@ def sn_spanning_helper(acc, buff, curr, m, prop='lemma_'):
         buff = deque(sorted(buff, key=operator.attrgetter('idx')), buff.maxlen)
 
     # Create the ngrams that end with the current node
-    # Having the n-grams in reverse lexical order is a bit odd
-    # for humans to read, but because it's deterministic, it
-    # shouldn't make any difference to the computer for using them as
-    # features
     gram = []
     if len(buff) >= m:
         for i, tok in enumerate(buff):
@@ -159,8 +155,8 @@ def sn_spanning_helper(acc, buff, curr, m, prop='lemma_'):
             # to be in the same state for the next child of curr
             sn_spanning_helper(acc, copy.copy(buff), c, m, prop=prop)
 
-    # Now, descend the parent's rights
-    # So long as this isn't the root
+    # Now, descend the parent's rights, so long as this isn't the root
+    # This is like climbing back up and then down the right.
     if curr.head is curr:
         return acc
     else:
