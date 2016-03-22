@@ -334,7 +334,7 @@ class NgramClassifierMulti(OneVsOneClassifier):
     Multi-class classifier using an n-gram language model as
     an estimator and an One vs One approach for multi-class classification"""
 
-    def __init__(self, n=4, alpha=0.01, pad_ngrams=False):
+    def __init__(self, n=4, alpha=0.01, pad_ngrams=False, use_dictionary=False, n_jobs=1):
         """
         :param n: The degree of the NgramModel
         :type n: int
@@ -358,12 +358,15 @@ class NgramClassifierMulti(OneVsOneClassifier):
         self.n = n
         self.alpha = alpha
         self.pad_ngrams = pad_ngrams
+        self.use_dictionary = use_dictionary
+        self.n_jobs = n_jobs
 
         # TODO: Multi-threaded
         super(NgramClassifierMulti, self).__init__(NgramClassifier(n=n,
                                                                    alpha=alpha,
-                                                                   pad_ngrams=pad_ngrams),
-                                                   n_jobs=1)
+                                                                   pad_ngrams=pad_ngrams,
+                                                                   use_dictionary=use_dictionary),
+                                                   n_jobs=n_jobs)
 
     def predict_proba(self, X):
         """
