@@ -9,14 +9,17 @@ problems use NgramClassifierMulti.
 """
 
 import warnings
-from nltk.probability import LidstoneProbDist
-from collections import Sequence, Iterable, Iterator
+from collections import Sequence, Iterable, Iterator, Counter
+import dill
+
 import numpy as np
+from nltk.probability import LidstoneProbDist
 from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.multiclass import OneVsOneClassifier, _predict_binary
+from sklearn.multiclass import OneVsOneClassifier
 
 from candidate_classifier.nltk_model import NgramModel
 from candidate_classifier import utils
+from candidate_classifier.dictionary import Dictionary
 
 
 
@@ -26,12 +29,8 @@ __author__ = 'Eric Lind'
 # - Good-Turing is screwed so that's out
 # - WrittenBell should be fine though
 # - make NgramClassifier a base class and use NgramMulti as the main class
+# - Test that it's pickleable
 
-
-def make_estimator(alpha):
-    def est(fdist, bins):
-        return LidstoneProbDist(fdist, alpha, bins)
-    return est
 
 
 # TODO: Add derivation to docs
@@ -46,7 +45,7 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
     of Movie Reviews; Submitted to the workshop track of ICLR 2015.
     http://arxiv.org/abs/1412.5335
     """
-    def __init__(self, n=4, alpha=0.01, pad_ngrams=False):
+    def __init__(self, n=4, alpha=0.01, pad_ngrams=False, use_dictionary=False):
         """
         :param n: The degree of the NgramModel
         :type n: int
@@ -58,6 +57,10 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         :param pad_ngrams: Whether to add additional padding to sentences when making ngrams
             in order to give more context to the documents.
         :type pad_ngrams: bool
+        :param use_dictionary: If True, convert all inputs into lists of integers before
+            training/predicting.  This can be particularly useful when training on a
+            large number of documents.
+        :type use_dictionary: bool
         """
         # Check params
         if n > 6:
@@ -70,8 +73,10 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         self.n = n
         self.alpha = alpha
         self.pad_ngrams = pad_ngrams
+        self.use_dictionary = use_dictionary
+        self.dictionary = Dictionary() if use_dictionary else None
         # self.estimator = lambda freqdist, bins: LidstoneProbDist(freqdist, alpha, bins)
-        self.est = make_estimator(alpha)
+        # self.est = make_estimator(alpha)
         self.classes = [0, 1]
 
         self.x1 = None
@@ -87,7 +92,13 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         self.y_ratio = 0
         self.y_log_ratio = 0
 
-    # FIXME: y needs to be a list, but what if it's HUGE?
+    @staticmethod
+    def _make_setimator(alpha):
+        def est(fdist, bins):
+            return LidstoneProbDist(fdist, alpha, bins)
+        return est
+
+
     def fit(self, X, y, classes=None):
         """
         Fit an Ngram Classifier on training documents in X and labels in y.
@@ -140,10 +151,10 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         # Build models
         self.m1 = NgramModel(self.n,
                              pad_left=self.pad_ngrams, pad_right=self.pad_ngrams,
-                             estimator=self.est)
+                             estimator=self._make_setimator(self.alpha))
         self.m2 = NgramModel(self.n,
                              pad_left=self.pad_ngrams, pad_right=self.pad_ngrams,
-                             estimator=self.est)
+                             estimator=self._make_setimator(self.alpha))
 
         # An ngram model should be able to train on very large datasets, too large for RAM.
         # In order to accommodate this, both models are trained in batches so that a shuffled
@@ -165,9 +176,15 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
                                      "of unequal length.")
                 # TODO: This basically acts like OneVsRest...
                 if lbl == self.classes[0]:
-                    b1.append(d)
+                    if self.use_dictionary:
+                        b1.append(self.dictionary[d])
+                    else:
+                        b1.append(d)
                 else:
-                    b2.append(d)
+                    if self.use_dictionary:
+                        b2.append(self.dictionary[d])
+                    else:
+                        b2.append(d)
             if max(len(b1), len(b2)) >= batch_size:
                 self._train_models(b1, b2)
                 # Clear old values
@@ -176,8 +193,8 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         self._train_models(b1, b2)
 
         # Set up models
-        self.m1._build_model(self.est, {})
-        self.m2._build_model(self.est, {})
+        self.m1._build_model(self._make_setimator(self.alpha), {})
+        self.m2._build_model(self._make_setimator(self.alpha), {})
 
         return self
 

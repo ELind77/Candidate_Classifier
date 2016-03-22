@@ -1,10 +1,14 @@
 from nose import tools as nosey
 import unittest
 from candidate_classifier.nltk_model import NgramModel
-from candidate_classifier.nltk_model.ngram_classifier import NgramClassifier
+from candidate_classifier.nltk_model.ngram_classifier import \
+    NgramClassifier, NgramClassifierMulti
+from candidate_classifier.dictionary import Dictionary
 import ujson
 import os
 import numpy as np
+
+from candidate_classifier.utils import flatten
 
 
 __author__ = 'Eric Lind'
@@ -52,12 +56,14 @@ def test_ngramclf_get_params():
     expected1 = {
         'n': 4,
         'alpha': 0.01,
-        'pad_ngrams': False
+        'pad_ngrams': False,
+        'use_dictionary': False
     }
     expected2 = {
         'n': c.n,
         'alpha': c.alpha,
-        'pad_ngrams': c.pad_ngrams
+        'pad_ngrams': c.pad_ngrams,
+        'use_dictionary': c.use_dictionary
     }
 
     nosey.assert_dict_equal(c.get_params(), expected1)
@@ -71,3 +77,22 @@ def test_ngramclf_predict_proba_dtype():
     probs = c.predict_proba(TEST_DATA)
     nosey.assert_is_instance(probs, np.ndarray)
     nosey.assert_equal(probs.shape, (len(TEST_DATA), 2))
+
+
+# Test Multiclass
+
+
+# Test  using dictionary
+def test_ngramclf_with_dictionary():
+    c = NgramClassifier(use_dictionary=True)
+    c.fit(BINARY_DATA, BINARY_LABELS)
+
+    # Check the dictionary
+    nosey.assert_is_instance(c.dictionary, Dictionary)
+    # check contents
+    for k, v in c.dictionary.d.iteritems():
+        nosey.assert_is_instance(k, basestring)
+        nosey.assert_is_instance(v, int)
+
+    # Check length
+    nosey.assert_equal(len(c.dictionary.d), len(set(filter( None, flatten(BINARY_DATA)))))
