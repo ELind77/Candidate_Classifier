@@ -239,6 +239,9 @@ class NgramModel(ModelI):
     # Should check if the probdist keeps a reference to it
     def _train_one(self, sent):
         """Train the model on a sequence"""
+
+        # print "TRAINING!"
+
         for ngram in ngrams(sent, self._n,
                             self._pad_left,
                             self._pad_right,

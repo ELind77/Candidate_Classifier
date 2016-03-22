@@ -11,6 +11,9 @@ problems use NgramClassifierMulti.
 import warnings
 from collections import Sequence, Iterable, Iterator, Counter
 import dill
+import types
+import copy_reg
+import multiprocessing as mp
 
 import numpy as np
 from nltk.probability import LidstoneProbDist
@@ -22,7 +25,6 @@ from candidate_classifier import utils
 from candidate_classifier.dictionary import Dictionary
 
 
-
 __author__ = 'Eric Lind'
 
 # TODO: Different estimators
@@ -31,6 +33,57 @@ __author__ = 'Eric Lind'
 # - make NgramClassifier a base class and use NgramMulti as the main class
 # - Test that it's pickleable
 
+# FIXME: Use cPickle to pass between forks?
+
+MODELS = []
+
+
+def _pickle_fxn(func):
+    return _unpickle_fxn, (dill.dumps(func),)
+
+
+def _unpickle_fxn(data):
+    return dill.loads(data)
+
+copy_reg.pickle(types.FunctionType, _pickle_fxn, _unpickle_fxn)
+
+
+class Worker(mp.Process):
+    def __init__(self, in_q, out_q, model):
+        self.in_q = in_q
+        self.out_q = out_q
+        self.model = model
+        super(Worker, self).__init__()
+
+    # make 'daemon' attribute always return False
+    def _get_daemon(self):
+        return False
+
+    def _set_daemon(self, value):
+        pass
+    daemon = property(_get_daemon, _set_daemon)
+
+    def run(self):
+        while True:
+            try:
+                doc = self.in_q.get()
+                # Poison pill
+                if doc is None:
+                    self.in_q.task_done()
+                    # Export the now-trained model
+                    self.out_q.put(self.model)
+                    # Shut down the worker
+                    print "%s Exiting" % self.name
+                    break
+                # Train the model
+                # print doc
+                self.model.train(doc)
+                # print self.model
+                # Tell the queue it's done
+                self.in_q.task_done()
+            except Exception, e:
+                print "Worker encountered error %s" % e
+        return
 
 
 # TODO: Add derivation to docs
@@ -45,7 +98,7 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
     of Movie Reviews; Submitted to the workshop track of ICLR 2015.
     http://arxiv.org/abs/1412.5335
     """
-    def __init__(self, n=4, alpha=0.01, pad_ngrams=False, use_dictionary=False):
+    def __init__(self, n=4, alpha=0.01, pad_ngrams=False, use_dictionary=False, parallel=False):
         """
         :param n: The degree of the NgramModel
         :type n: int
@@ -54,8 +107,8 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
             smoothing, anything else is Lidstone.  It is a good idea to tune this
             parameter.
         :type alpha: float
-        :param pad_ngrams: Whether to add additional padding to sentences when making ngrams
-            in order to give more context to the documents.
+        :param pad_ngrams: Whether to add additional padding to sentences when making
+            ngrams in order to give more context to the documents.
         :type pad_ngrams: bool
         :param use_dictionary: If True, convert all inputs into lists of integers before
             training/predicting.  This can be particularly useful when training on a
@@ -75,6 +128,7 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         self.pad_ngrams = pad_ngrams
         self.use_dictionary = use_dictionary
         self.dictionary = Dictionary() if use_dictionary else None
+        self.parallel = parallel
         # self.estimator = lambda freqdist, bins: LidstoneProbDist(freqdist, alpha, bins)
         # self.est = make_estimator(alpha)
         self.classes = [0, 1]
@@ -92,12 +146,16 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         self.y_ratio = 0
         self.y_log_ratio = 0
 
+        # Multiprocessing
+        # self.queues = []
+        # self.result_queues = []
+        # self.workers = []
+
     @staticmethod
     def _make_setimator(alpha):
         def est(fdist, bins):
             return LidstoneProbDist(fdist, alpha, bins)
         return est
-
 
     def fit(self, X, y, classes=None):
         """
@@ -119,6 +177,8 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         :param y: An iterable of labels for each sequence in X.  There must be exactly
             two unique labels
         :type y: Iterable
+        :param classes: A list of classes to fit against
+        :type classes: list
         :returns: self
         """
         # Check y
@@ -162,6 +222,61 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         # examples of each class before training.
         # Most ML models behave differently based on the order of the training data, ngram
         # models don't care.
+        # FIXME: Add param and switch for multi-threaded
+        # FIXME: Don't let queues fill with docs because that will defeat the purpose of using a generator
+
+        if self.parallel:
+            self._train_parallel(X, y)
+        else:
+            self._train_sync(X, y)
+
+        print "Finished training"
+
+        # Set up models
+        # self.m1 = self.workers[0].model
+        # self.m2 = self.workers[1].model
+        self.m1._build_model(self._make_setimator(self.alpha), {})
+        self.m2._build_model(self._make_setimator(self.alpha), {})
+
+        print "Built models"
+
+        # self.workers[0].model._build_model(self._make_setimator(self.alpha), {})
+        # self.workers[1].model._build_model(self._make_setimator(self.alpha), {})
+
+        return self
+
+    def _train_parallel(self, X, y):
+        models = [self.m1, self.m2]
+
+        # Create workers
+        queues = [mp.JoinableQueue(), mp.JoinableQueue()]
+        result_queues = [mp.JoinableQueue(), mp.JoinableQueue()]
+        workers = [Worker(queues[i], result_queues[i], models[i]) for i in (0, 1)]
+        workers[0].start()
+        workers[1].start()
+
+        for i, doc in enumerate(X):
+            if y[i] == self.classes[0]:
+                queues[0].put(doc)
+            else:
+                queues[1].put(doc)
+        # Poison pills
+        for q in queues:
+            q.put(None)
+
+        # Wait for training to finish
+        for q in queues:
+            q.join()
+
+        # Get the models
+        self.m1 = result_queues[0].get()
+        self.m2 = result_queues[1].get()
+
+
+    def _train_sync(self, X, y):
+        """
+        Synchronous training for models
+        """
         b1 = []
         b2 = []
         y_itr = iter(y)
@@ -191,12 +306,6 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
                 b1 = []
                 b2 = []
         self._train_models(b1, b2)
-
-        # Set up models
-        self.m1._build_model(self._make_setimator(self.alpha), {})
-        self.m2._build_model(self._make_setimator(self.alpha), {})
-
-        return self
 
     def _train_models(self, b1, b2):
         for d in b1:
@@ -462,3 +571,17 @@ def logsumexp2(arr, axis=0):
     # out = np.log2(np.sum(np.exp2(arr - vmax), axis=0))
     out += vmax
     return out
+
+
+if __name__ == '__main__':
+    DOC1 = u"I'm starting to know what God felt like when he sat out " \
+           "there in the darkness, creating the world."
+    DOC2 = u"And what did he feel like, Lloyd, my dear?"
+    DOC3 = u"Very pleased he'd taken his Valium."
+    X = [d.split() for d in (DOC1, DOC2, DOC3)]
+    y = [1, 0, 1]
+
+
+    ngm = NgramClassifier()
+
+    ngm.fit(X, y)
