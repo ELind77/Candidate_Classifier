@@ -44,6 +44,7 @@ def _estimator(fdist, **estimator_kwargs):
     return LidstoneProbDist(fdist, 0.001, **estimator_kwargs)
 
 
+
 @compat.python_2_unicode_compatible
 class NgramModel(ModelI):
     """
@@ -57,6 +58,7 @@ class NgramModel(ModelI):
                  pad_left=False,
                  pad_right=False,
                  estimator=_estimator,
+                 cache_training=None,
                  **estimator_kwargs):
         """
         Create an ngram language model to capture patterns in n consecutive
@@ -158,12 +160,12 @@ class NgramModel(ModelI):
         if isinstance(docs, GeneratorType) or isinstance(docs, Iterator):
             nxt = docs.next()
             # Either it's a string or a list of string
-            if isinstance(nxt, basestring):
+            if isinstance(nxt, (basestring, int)):
                 docs = [itertools.chain([nxt], docs)]
             elif isinstance(nxt, Sequence):
                 # It should be a list of string...
                 # FIXME: Handle generator here as well
-                if isinstance(nxt[0], basestring):
+                if isinstance(nxt[0], (basestring, int)):
                     # So docs is a generator that yields sequences of str
                     docs = itertools.chain([nxt], docs)
             else:
@@ -181,12 +183,12 @@ class NgramModel(ModelI):
             # If it's empty, assume training will happen later
             if len(docs) == 0:
                 pass
-            elif isinstance(docs[0], basestring):
+            elif isinstance(docs[0], (basestring, int)):
                 # Make it into a list of lists
                 docs = [docs]
             elif isinstance(docs[0], Sequence):
                 # Check inner to make sure it's a string
-                if not isinstance(docs[0][0], basestring):
+                if not isinstance(docs[0][0], (basestring, int)):
                     raise TypeError("Training documents given to NgramModel were neither a "
                                     "list of string nor a list of list of string: %s" % docs)
                 # If it is a string everything is fine, nothing to worry about
@@ -282,7 +284,7 @@ class NgramModel(ModelI):
         """
         n_outcomes = len(self.outcomes)
         if n_outcomes <= 0:
-            raise Exception("NgramModel can't build a model without training input!")
+            raise RuntimeError("NgramModel can't build a model without training input!")
 
         estimator_kwargs['bins'] = n_outcomes
 
