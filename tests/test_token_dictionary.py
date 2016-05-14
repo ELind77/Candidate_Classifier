@@ -1,5 +1,5 @@
 from nose import tools as nosey
-from candidate_classifier.dictionary import Dictionary
+from candidate_classifier.token_dictionary import Dictionary
 
 
 __author__ = 'Eric Lind'
