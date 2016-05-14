@@ -7,11 +7,11 @@ from collections import Iterable
 __author__ = 'Eric Lind'
 
 
-class Dictionary(object):
+class TokenDictionary(object):
     """A dictionary class to map strings/tokens to integer ids.
 
-    >>> from candidate_classifier.nltk_model.ngram_classifier import Dictionary
-    >>> d = Dictionary()
+    >>> from candidate_classifier.nltk_model.ngram_classifier import TokenDictionary
+    >>> d = TokenDictionary()
     >>> s = "Anything you can do I can do better.".split()
     >>> d[s]
     [0, 1, 2, 3, 4, 2, 3, 5]
