@@ -3,7 +3,7 @@ import unittest
 from candidate_classifier.nltk_model import NgramModel
 from candidate_classifier.nltk_model.ngram_classifier import \
     NgramClassifier, NgramClassifierMulti
-from candidate_classifier.dictionary import Dictionary
+from candidate_classifier.token_dictionary import TokenDictionary
 import ujson
 import os
 import numpy as np
