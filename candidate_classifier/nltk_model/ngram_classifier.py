@@ -8,8 +8,10 @@ The base NgramClassifier is only a binary classifier.  For multi-class
 problems use NgramClassifierMulti.
 """
 
+from __future__ import division
+
 import warnings
-from collections import Sequence, Iterable, Iterator, Counter
+from collections import Sequence, Iterable, Iterator
 import dill
 import types
 import copy_reg
@@ -17,12 +19,16 @@ import multiprocessing as mp
 
 import numpy as np
 from nltk.probability import LidstoneProbDist
-from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from sklearn.multiclass import OneVsOneClassifier
+from sklearn.utils.validation import check_consistent_length
+from sklearn.multiclass import _fit_ovo_binary
+from joblib import Parallel, delayed
 
 from candidate_classifier.nltk_model import NgramModel
 from candidate_classifier import utils
-from candidate_classifier.dictionary import Dictionary
+from candidate_classifier.token_dictionary import TokenDictionary
+
 
 
 __author__ = 'Eric Lind'
@@ -33,22 +39,44 @@ __author__ = 'Eric Lind'
 # - make NgramClassifier a base class and use NgramMulti as the main class
 # - Test that it's pickleable
 
-# FIXME: Use cPickle to pass between forks?
-
-MODELS = []
 
 
+
+# Helpers to make functions pickleable
 def _pickle_fxn(func):
     return _unpickle_fxn, (dill.dumps(func),)
 
-
 def _unpickle_fxn(data):
     return dill.loads(data)
-
 copy_reg.pickle(types.FunctionType, _pickle_fxn, _unpickle_fxn)
 
 
 class Worker(mp.Process):
+    """A queue consumer for multi-process training of ngram models.
+    Consumes training data from a queue and when done, dumps the
+    trained model into the output queue.
+
+    Use of the queue allows training from a corpus that is larger
+    than RAM when the corpus/labels have been shuffled.
+    For example, if the labels are: [0, 0, 0, 1, 0, 1] then in order
+    to train sequentially, you would need to read in the entire
+    training set and the labels in order to start training.  But
+    if each model is trained in it's own process, the training data
+    only has to be looped over once.
+
+    The downside to this is that the (very large) models have to be
+    pickled and sent back to the main thread and that has to be done
+    sequentially.  Also, in python 2.7 it looks like pickle is used
+    instead of cPickle, which makes everything worse.
+
+    Possible enhancements:
+    - Register cPickle as the pickler for Ngram Model
+    - Have NgramModel write all of the large data stores to disk before
+        sending model back to the main thread and then asynchronously
+        load all of them in the background (relying on the OS for
+        parallelizing the file reads) and return from fit method when
+        all models are loaded.
+    """
     def __init__(self, in_q, out_q, model):
         self.in_q = in_q
         self.out_q = out_q
@@ -73,7 +101,7 @@ class Worker(mp.Process):
                     # Export the now-trained model
                     self.out_q.put(self.model)
                     # Shut down the worker
-                    print "%s Exiting" % self.name
+                    # print "%s Exiting" % self.name
                     break
                 # Train the model
                 # print doc
@@ -84,6 +112,79 @@ class Worker(mp.Process):
             except Exception, e:
                 print "Worker encountered error %s" % e
         return
+
+
+# TODO: LaTeX
+
+
+def _calc_prob_ratio(sequence, m1, m2, y1_prob, y2_prob, y_log_ratio):
+    """
+    Calculates the ratio of the two class probabilities.
+
+    Given a sequence, a language model returns the probability of
+    that sequence, given the data that it was trained on, P(x|y).
+    According to Bayes' Theorem this gives us:
+
+    P(x|y) = (P(y|x) * P(x)) / P(y)
+
+    Now if we have two classes, trained on Y+ and Y-, respectively,
+    and we divide P(x|Y+)/P(x|Y-) and multiply by P(Y+)/P(Y-) we get:
+        P(Y+|x) / P(Y-|x)
+    Which is the ratio of the probability of the sequence having one
+    of the two classes.  This gives the classification rule: If this
+    ratio is greater than 1 assign Y+, otherwise Y-.
+
+    :param sequence:
+    :type sequence: Iterable
+    :param m1:
+    :type m1: NgramModel
+    :param m2:
+    :type m2: NgramModel
+    :type y1_prob: float
+    :type y2_prob: float
+    :type y_log_ratio: float
+    """
+    # Get the negative log probabilities
+    # NB: ngram model returns negative log probability so need to
+    # make negative to get the actual log probability
+    p1 = np.float128(-m1.prob_seq(sequence))
+    p2 = np.float128(-m2.prob_seq(sequence))
+
+    # Handle 0 for both
+    # This is actually the tie-breaking rule...
+    # TODO: Return 0 for ties and handle tie-breaking in get_prediction
+    if p1 == p2 == 0:
+        # FIXME: Refactor this
+        # Return a random value based on training data frequency
+        choice = np.random.choice([0, 1], 1, p=[y1_prob, y2_prob])[0]
+        if choice == 0:
+            return 2.0
+        else:
+            return -0.1
+    # Handle division by zero
+    # FIXME: Do I still need this in log-space?
+    # No, but it's nice to have
+    if p2 == 0:
+        # If only the second class has zero probability, return a ratio
+        # value greater than 0 so the first class is picked
+        return 2.0
+
+    # Calculate the ratio of the probability that the sequence has
+    # class one given the sequence, to the probability of class2 given
+    # the sequence.
+    # Calculate the ratio using log rules:
+    # r = (p1/p2) * (py1/py2) becomes this in log space:
+    # log(r) = log((p1*py1)/(p2*py2))
+    # log(r) = (log(p1) - log(p2)) + (log(y1) - log(y2))
+    return (p1 - p2) + y_log_ratio
+
+    # Calculate the ratio of the probability that the sequence has
+    # class one given the sequence, to the probability of class2 given
+    # the sequence
+    # p1 = np.exp2(-self.m1.prob_seq(sq))
+    # p2 = np.exp2(-self.m2.prob_seq(sq))
+    # return (p1/p2) * self.y_ratio
+
 
 
 # TODO: Add derivation to docs
@@ -127,7 +228,7 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         self.alpha = alpha
         self.pad_ngrams = pad_ngrams
         self.use_dictionary = use_dictionary
-        self.dictionary = Dictionary() if use_dictionary else None
+        self.dictionary = TokenDictionary() if use_dictionary else None
         self.parallel = parallel
         # self.estimator = lambda freqdist, bins: LidstoneProbDist(freqdist, alpha, bins)
         # self.est = make_estimator(alpha)
@@ -145,11 +246,6 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         self.y_log_probs = np.zeros(2)
         self.y_ratio = 0
         self.y_log_ratio = 0
-
-        # Multiprocessing
-        # self.queues = []
-        # self.result_queues = []
-        # self.workers = []
 
     @staticmethod
     def _make_setimator(alpha):
@@ -193,8 +289,11 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         uniqs = np.unique(y, return_counts=True)
         self.classes = uniqs[0]
         self.n_y1 = uniqs[1][0]
-        self.n_y2 = uniqs[1][1]
-        if self.classes.shape[0] != 2:
+        try:
+            self.n_y2 = uniqs[1][1]
+        except IndexError:
+            pass
+        if self.classes.shape[0] > 2:
             raise ValueError("Number of classes not equal to two. "
                              "NGramClassifier is a binary classifier and requires exactly "
                              "two classes to be specified. %s" % classes)
@@ -206,7 +305,8 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         self.y_probs = np.asarray([self.y1_prob, self.y2_prob], dtype=np.float64)
         self.y_log_probs = np.log2(self.y_probs)
         self.y_ratio = self.y1_prob / self.y2_prob
-        self.y_log_ratio = np.log2(self.y1_prob / self.y2_prob)
+        self.y_log_ratio = np.log2(self.y_ratio)
+
 
         # Build models
         self.m1 = NgramModel(self.n,
@@ -230,18 +330,19 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         else:
             self._train_sync(X, y)
 
-        print "Finished training"
+        # print "Finished training"
 
         # Set up models
         # self.m1 = self.workers[0].model
         # self.m2 = self.workers[1].model
-        self.m1._build_model(self._make_setimator(self.alpha), {})
-        self.m2._build_model(self._make_setimator(self.alpha), {})
+        # FIXME: don't let that error through
+        try:
+            self.m1._build_model(self._make_setimator(self.alpha), {})
+            self.m2._build_model(self._make_setimator(self.alpha), {})
+        except RuntimeError:
+            pass
 
-        print "Built models"
-
-        # self.workers[0].model._build_model(self._make_setimator(self.alpha), {})
-        # self.workers[1].model._build_model(self._make_setimator(self.alpha), {})
+        # print "Built models"
 
         return self
 
@@ -272,7 +373,6 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         self.m1 = result_queues[0].get()
         self.m2 = result_queues[1].get()
 
-
     def _train_sync(self, X, y):
         """
         Synchronous training for models
@@ -284,22 +384,15 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
 
         for chunk in utils.chunked(X, batch_size):
             for d in chunk:
-                try:
-                    lbl = y_itr.next()
-                except StopIteration:
-                    raise ValueError("Labels and training data for NgramClassifier were "
-                                     "of unequal length.")
+                lbl = y_itr.next()
+                if self.use_dictionary:
+                    d = self.dictionary[d]
+
                 # TODO: This basically acts like OneVsRest...
                 if lbl == self.classes[0]:
-                    if self.use_dictionary:
-                        b1.append(self.dictionary[d])
-                    else:
-                        b1.append(d)
+                    b1.append(d)
                 else:
-                    if self.use_dictionary:
-                        b2.append(self.dictionary[d])
-                    else:
-                        b2.append(d)
+                    b2.append(d)
             if max(len(b1), len(b2)) >= batch_size:
                 self._train_models(b1, b2)
                 # Clear old values
@@ -326,7 +419,7 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         return [self._get_prediction(sent) for sent in X]
 
     def _get_prediction(self, sequence):
-        r = self._calc_prob_ratio(sequence)
+        r = _calc_prob_ratio(sequence, self.m1, self.m2, self.y1_prob, self.y2_prob, self.y_log_ratio)
 
         # FIXME: Tie breaker?
         # I handle this in calculating the ratio, but it would be good to be more
@@ -338,52 +431,49 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
             return self.classes[0]
         else:
             return self.classes[1]
-        # if r > 1:
-        #     return self.classes[0]
-        # else:
-        #     return self.classes[1]
 
-    def _calc_prob_ratio(self, sequence):
-        """Calculates the ratio of the tow class probabilities"""
-        # Get the negative log probabilities
-        # NB: ngram model returns negative log probability so need to
-        # make negative to get the actual log probability
-        p1 = np.float128(-self.m1.prob_seq(sequence))
-        p2 = np.float128(-self.m2.prob_seq(sequence))
-
-        # Handle 0 for both
-        # This is actually the tie-breaking rule...
-        # TODO: Return 0 for ties and handle tie-breaking in get_prediction
-        if p1 == p2 == 0:
-            # FIXME: Refactor this
-            # Return a random value based on training data frequency
-            choice = np.random.choice(self.classes, 1, p=[self.y1_prob, self.y2_prob])[0]
-            if choice == self.classes[0]:
-                return 2.0
-            else:
-                return -0.1
-        # Handle division by zero
-        # FIXME: Do I still need this in log-space?
-        # No, but it's nice to have
-        if p2 == 0:
-            # If only the second class has zero probability, return a ratio
-            # value greater than 0 so the first class is picked
-            return 2.0
-
-        # Calculate the ratio of the probability that the sequence has
-        # class one given the sequence, to the probability of class2 given
-        # the sequence.
-        # Calculate the ratio using log rules:
-        # r = (p1/p2) * (py1/py2) becomes this in log space:
-        # log(r) = log((p1*py1)/(p2*py2))
-        return (p1 - p2) + self.y_log_ratio
-
-        # Calculate the ratio of the probability that the sequence has
-        # class one given the sequence, to the probability of class2 given
-        # the sequence
-        # p1 = np.exp2(-self.m1.prob_seq(sq))
-        # p2 = np.exp2(-self.m2.prob_seq(sq))
-        # return (p1/p2) * self.y_ratio
+    # def _calc_prob_ratio(self, sequence):
+    #     """Calculates the ratio of the two class probabilities"""
+    #     # Get the negative log probabilities
+    #     # NB: ngram model returns negative log probability so need to
+    #     # make negative to get the actual log probability
+    #     p1 = np.float128(-self.m1.prob_seq(sequence))
+    #     p2 = np.float128(-self.m2.prob_seq(sequence))
+    #
+    #     # Handle 0 for both
+    #     # This is actually the tie-breaking rule...
+    #     # TODO: Return 0 for ties and handle tie-breaking in get_prediction
+    #     if p1 == p2 == 0:
+    #         # FIXME: Refactor this
+    #         # Return a random value based on training data frequency
+    #         choice = np.random.choice(self.classes, 1, p=[self.y1_prob, self.y2_prob])[0]
+    #         if choice == self.classes[0]:
+    #             return 2.0
+    #         else:
+    #             return -0.1
+    #     # Handle division by zero
+    #     # FIXME: Do I still need this in log-space?
+    #     # No, but it's nice to have
+    #     if p2 == 0:
+    #         # If only the second class has zero probability, return a ratio
+    #         # value greater than 0 so the first class is picked
+    #         return 2.0
+    #
+    #     # Calculate the ratio of the probability that the sequence has
+    #     # class one given the sequence, to the probability of class2 given
+    #     # the sequence.
+    #     # Calculate the ratio using log rules:
+    #     # r = (p1/p2) * (py1/py2) becomes this in log space:
+    #     # log(r) = log((p1*py1)/(p2*py2))
+    #     # log(r) = (log(p1) - log(p2)) + (log(y1) - log(y2))
+    #     return (p1 - p2) + self.y_log_ratio
+    #
+    #     # Calculate the ratio of the probability that the sequence has
+    #     # class one given the sequence, to the probability of class2 given
+    #     # the sequence
+    #     # p1 = np.exp2(-self.m1.prob_seq(sq))
+    #     # p2 = np.exp2(-self.m2.prob_seq(sq))
+    #     # return (p1/p2) * self.y_ratio
 
     # FIXME: Better documentation explanation
     # The better way to accurately estimate these probabilities would be to find a
@@ -433,9 +523,22 @@ class NgramClassifier(BaseEstimator, ClassifierMixin):
         Should return an array of shape: (n_samples, 2)
         """
         # Use log properties to multiply the two probabilities in log-space
+        # FIXME: The mathematical formulation calls for weighting by class
+        # probabilities, but that doesn't seem to have any meaningful impact on the
+        # results.
         return np.asarray([self._get_log_probs(s) + self.y_log_probs for s in X],
                           dtype=np.float128)
+        # return np.asarray([self._get_log_probs(s) for s in X],
+        #                   dtype=np.float128)
 
+
+def _fit_one(estimator, X, y, cls):
+    """Fit a single NgramModel on a given class"""
+    X = X[y == cls]
+    y = y[y == cls]
+    estimator = clone(estimator)
+    estimator.fit(X, y)
+    return estimator
 
 
 class NgramClassifierMulti(OneVsOneClassifier):
@@ -469,13 +572,119 @@ class NgramClassifierMulti(OneVsOneClassifier):
         self.pad_ngrams = pad_ngrams
         self.use_dictionary = use_dictionary
         self.n_jobs = n_jobs
+        self.classes_ = []
+        self.class_probs = []
+        self.estimators_ = []
 
-        # TODO: Multi-threaded
         super(NgramClassifierMulti, self).__init__(NgramClassifier(n=n,
                                                                    alpha=alpha,
                                                                    pad_ngrams=pad_ngrams,
                                                                    use_dictionary=use_dictionary),
                                                    n_jobs=n_jobs)
+
+    def fit(self, X, y):
+        """Fit underlying estimators.
+        Modified from the method in `OneVsOne` in order to account for the
+        nature of the N-gram model.  Because a ngram model is only really
+        trained on a single class, there's no real need to train a bunch
+        of classifiers on each pairing of classes.  Instead one model is
+        created for each class and their outputs are combined in order to
+        make predictions.
+
+        Parameters
+        ----------
+        X : array-like, shape = [n_samples, unk]
+            Every sample should be a list of strings (or integers
+            representing tokens).
+
+        y : array-like, shape = [n_samples]
+            Multi-class targets.
+
+        Returns
+        -------
+        self
+        """
+        # FIXME: should work for generators...
+        y = np.asarray(y)
+        check_consistent_length(X, y)
+
+        uniqs = np.unique(y, return_counts=True)
+        self.classes_ = uniqs[0]
+        class_counts = uniqs[1]
+        self.overall_class_probs = class_counts / np.sum(class_counts)
+
+        pair_class_probs = []
+        for i in xrange(self.n_classes_):
+            for j in xrange(i+1, self.n_classes_):
+                sm = class_counts[i] + class_counts[j]
+                y1_prob = class_counts[i]/sm
+                y2_prob = class_counts[j]/sm
+                pair_class_probs.append([y1_prob, y2_prob])
+        self.pair_class_probs = pair_class_probs
+
+
+        self.estimators_ = Parallel(n_jobs=self.n_jobs)(
+            delayed(_fit_one)(self.estimator, X, y, c)
+            for c in self.classes_
+        )
+        return self
+
+    # TODO: This could probably be supported
+    def partial_fit(self, X, y, classes=None):
+        raise NotImplementedError("Partial fit is not implemented for NgramClassifierMulti")
+
+
+    def predict(self, X):
+        """
+        Estimate the best class label for each sample in X.
+        Parameters
+        ----------
+        X : array-like, shape = [n_samples, unk]
+            Every sample should be a list of strings (or integers
+            representing tokens).
+
+        Returns
+        -------
+        y : numpy array of shape [n_samples]
+            Predicted multi-class targets.
+        """
+        out = []
+        for s in X:
+            # I shouldn't actually need to move out of log-space here...
+            probs = np.asarray([-e.m1.prob_seq(s) for e in self.estimators_], dtype=np.float128)
+            # probs = probs + np.log2(self.class_probs)
+            out.append(self.classes_[probs.argmax()])
+        return np.asarray(out)
+
+        #out = []
+#        # Now with voting
+#
+#        # For every pairing of models,
+#        for y_idx, i in enumerate(xrange(self.n_classes_)):
+#            for j in xrange(i+1, self.n_classes_):
+#                m1 = self.estimators_[i].m1
+#                m2 = self.estimators_[j].m1
+#                y1_prob = self.pair_class_probs[y_idx][0]
+#                y2_prob = self.pair_class_probs[y_idx][1]
+#                # calc class log prob ratio
+#                y_log_ratio = np.log2(y1_prob/y2_prob)
+#
+#                predictions = []
+#                # For every sequence:
+#                for s in X:
+#                    # calc r
+#                    r = _calc_prob_ratio(s, m1, m2, y1_prob, y2_prob, y_log_ratio)
+#
+#                    # Add prediction
+#                    if r > 0:
+#                        predictions.append(self.classes_[0])
+#                    else:
+#                        predictions.append(self.classes_[1])
+#
+#                out.append(predictions)
+#        # Out should become (n_samples, n_classifiers)
+#        out = np.vstack(out).T
+#        return self.classes_[out.argmax(axis=1)]
 
     def predict_proba(self, X):
         """
@@ -499,14 +708,12 @@ class NgramClassifierMulti(OneVsOneClassifier):
         probs = self._get_probs(X)
         # Calculate the average while in logspace by dividing (subtracting)
         # the number of non-zero values in each column
-        return (logsumexp2(probs, axis=0) - (len(self.classes_) - 1)).T
+        return (logsumexp2(probs, axis=0) - self.n_classes_).T
 
 
     def _get_probs(self, X):
         """
         :param X:
-        :param lg: If True, use log probabilities
-        :type lg: bool
         :return: array (n_estimators, n_classes, n_estimators)
         """
         # Need to create an array (n_classes, n_samples)
@@ -545,6 +752,7 @@ def logsumexp2(arr, axis=0):
     Returns log(sum(exp(arr))) while minimizing the possibility of
     over/underflow.
 
+
     Examples
     --------
 
@@ -574,14 +782,26 @@ def logsumexp2(arr, axis=0):
 
 
 if __name__ == '__main__':
-    DOC1 = u"I'm starting to know what God felt like when he sat out " \
-           "there in the darkness, creating the world."
-    DOC2 = u"And what did he feel like, Lloyd, my dear?"
-    DOC3 = u"Very pleased he'd taken his Valium."
-    X = [d.split() for d in (DOC1, DOC2, DOC3)]
-    y = [1, 0, 1]
+    # DOC1 = u"I'm starting to know what God felt like when he sat out " \
+    #        "there in the darkness, creating the world."
+    # DOC2 = u"And what did he feel like, Lloyd, my dear?"
+    # DOC3 = u"Very pleased he'd taken his Valium."
+    # data = np.asarray([datum.split() for datum in (DOC1, DOC2, DOC3)])
+    # labels = [1, 0, 2]
+
+    import cPickle as pickle
+
+    with open('candidate_classifier/data/processed/pre-processed.pkl', 'rb') as _f:
+        preprocessed = pickle.load(_f)
+
+    docs = preprocessed['int_docs']
+    labels = preprocessed['labels']
+
+    del preprocessed
+    del _f
+    candidates = sorted(list(set(labels)))
 
 
-    ngm = NgramClassifier()
-
-    ngm.fit(X, y)
+    ngm = NgramClassifierMulti()
+    ngm.fit(np.asarray(docs[:1000]), labels[:1000])
+    ngm.predict(np.asarray(docs[1000:1010]))
