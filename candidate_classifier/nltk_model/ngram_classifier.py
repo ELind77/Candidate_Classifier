@@ -589,7 +589,8 @@ class NgramClassifierMulti(OneVsOneClassifier):
         trained on a single class, there's no real need to train a bunch
         of classifiers on each pairing of classes.  Instead one model is
         created for each class and their outputs are combined in order to
-        make predictions.
+        make predictions.  This basically trades off a (huge) multiplier
+        on space complexity in favor of slightly slower predictions.
 
         Parameters
         ----------
@@ -622,7 +623,7 @@ class NgramClassifierMulti(OneVsOneClassifier):
                 pair_class_probs.append([y1_prob, y2_prob])
         self.pair_class_probs = pair_class_probs
 
-
+        # FIXME: Still sending out all of the data for ALL classes...
         self.estimators_ = Parallel(n_jobs=self.n_jobs)(
             delayed(_fit_one)(self.estimator, X, y, c)
             for c in self.classes_
@@ -713,8 +714,8 @@ class NgramClassifierMulti(OneVsOneClassifier):
 
     def _get_probs(self, X):
         """
-        :param X:
-        :return: array (n_estimators, n_classes, n_estimators)
+        :param X: and array with n_samples rows
+        :return: array (n_estimators, n_classes, n_samples)
         """
         # Need to create an array (n_classes, n_samples)
         # Populate an array (n_estimators, n_classes, n_samples)
@@ -722,11 +723,11 @@ class NgramClassifierMulti(OneVsOneClassifier):
         # I do this by creating a list of tuples where each tuple corresponds to
         # a result from model.predict_proba and the values in the tuple are the
         # columns those predictions should go in the probs array.
-        # You have to think about it in 3D fo it to really make any sense, but
+        # You have to think about it in 3D for it to really make any sense, but
         # the idea is to take this list of 2D arrays and put each column from those
         # 2D arrays into the right "stack" (depth column) of the probs array.
         n_estimators = len(self.estimators_)
-        n_classes = len(self.classes_)
+        n_classes = self.n_classes_
         idxs = [(i, j) for i in range(n_classes) for j in range(i + 1, n_classes)]
         confidences = [est.predict_log_proba(X) for est in self.estimators_]
 
