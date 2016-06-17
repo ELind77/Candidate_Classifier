@@ -53,7 +53,7 @@ def word_tokenizer(s):
     return ['<S>'] + [t.lower_ for t in toks] + ['</S>']
 
 
-DOC_TRANSFORMER = TransformerABC(
+DOC_TRANSFORMER = StringTransformer(
     prefilter_substitutions=[BRACKET_PATTERN,
                              (SPACED_ELLIPSIS_PATTERN, '...'),
                              (MULTI_ELLIPSIS_PATTERN, '...'),
@@ -61,7 +61,7 @@ DOC_TRANSFORMER = TransformerABC(
     tokenizer=sent_tokenizer)
 
 
-SENT_TRANSFORMER = TransformerABC(
+SENT_TRANSFORMER = StringTransformer(
     prefilter_substitutions=['strip', 'whitespace'],
     filters=[STARTS_WITH_ELLIPSIS, ENDS_WITH_ELLIPSIS, STARTS_WITH_DASH, ENDS_WITH_DASH],
     tokenizer=word_tokenizer)

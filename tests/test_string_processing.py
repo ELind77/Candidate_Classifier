@@ -13,15 +13,15 @@ DOCS = [DOC1, DOC2, DOC3]
 
 
 def test_string_processor_returns_string_for_string():
-    processor = TransformerABC()
+    processor = StringTransformer()
     nosey.assert_equal(DOC1, processor(DOC1))
 
 
 def test_string_processor_returns_list_for_string():
-    processor = TransformerABC(tokenizer=string.split)
+    processor = StringTransformer(tokenizer=string.split)
     nosey.assert_equal(DOC1.split(), processor(DOC1))
 
 
 def test_string_processor_works_as_a_generator():
-    processor = TransformerABC()
+    processor = StringTransformer()
     nosey.assert_equal(DOCS, [d for d in processor(DOCS)])

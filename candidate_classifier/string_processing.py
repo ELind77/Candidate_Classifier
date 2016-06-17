@@ -182,7 +182,7 @@ def pattern_sub(pattern, replacement=''):
 # TODO:
 # Make a repr that shows the current filters/substitutions being used
 # Add the available built-in filters/substitutions to the docstring
-class TransformerABC(object):
+class StringTransformer(object):
     """Interface for applying transformations to a string/token"""
 
     re_type = type(re.compile(r''))

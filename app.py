@@ -5,7 +5,7 @@ from spacy.en import English
 import string
 
 from candidate_classifier.build_models import get_models
-from candidate_classifier.string_processing import TransformerABC
+from candidate_classifier.string_processing import StringTransformer
 
 
 
@@ -23,18 +23,18 @@ NLP = English(entity=False, tagger=False, parser=False, load_vectors=False)
 PUNCT = frozenset(string.punctuation)
 def add_punct(s):
     if s[-1] not in PUNCT:
-         s += u'.'
+        s += u'.'
     return s
 
 def tokenizer(s):
     return ['<S>'] + [t.lower_ for t in NLP(s)] + ['</S>']
 
-STRING_PROCESSOR = TransformerABC(prefilter_substitutions=['html',
-                                                           'whitespace',
-                                                           'strip',
-                                                           'deaccent',
-                                                           add_punct],
-                                  tokenizer=tokenizer)
+STRING_PROCESSOR = StringTransformer(prefilter_substitutions=['html',
+                                                              'whitespace',
+                                                              'strip',
+                                                              'deaccent',
+                                                              add_punct],
+                                     tokenizer=tokenizer)
 
 #
 # ROUTES
